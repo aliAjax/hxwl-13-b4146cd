@@ -35,6 +35,45 @@ document.querySelector('#app').innerHTML = `
       <button id="sample">载入示例</button>
     </header>
 
+    <section class="panel" id="csvImportSection">
+      <div class="panelHead">
+        <h2>CSV导入预览</h2>
+        <div class="csvActions">
+          <label class="csvUploadBtn">
+            <input type="file" id="csvFileInput" accept=".csv" style="display:none" />
+            <span>选择CSV文件</span>
+          </label>
+          <button id="downloadTemplateBtn" class="primary">下载模板</button>
+        </div>
+      </div>
+      <div id="csvDropZone" class="csvDropZone">
+        <p>拖拽CSV文件到此处，或点击上方按钮选择文件</p>
+        <p class="csvHint">CSV需包含：日期、电器、时段、使用时长、功率、备注</p>
+      </div>
+      <div id="csvPreviewContainer" style="display:none; margin-top:18px;">
+        <div id="csvStats" class="csvStats"></div>
+        <div class="tableWrap"><table class="csvPreviewTable">
+          <thead>
+            <tr>
+              <th>行号</th>
+              <th>日期</th>
+              <th>电器</th>
+              <th>时段</th>
+              <th>使用时长(h)</th>
+              <th>功率(W)</th>
+              <th>备注</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody id="csvPreviewRows"></tbody>
+        </table></div>
+        <div style="margin-top:16px; display:flex; gap:12px; justify-content:flex-end;">
+          <button id="cancelCsvBtn" style="background:#e4ecff; border:0; border-radius:6px; padding:11px 24px;">取消</button>
+          <button id="confirmCsvBtn" class="primary">确认导入</button>
+        </div>
+      </div>
+    </section>
+
     <section class="layout">
       <form id="form" class="panel">
         <h2>用电记录</h2>
@@ -182,6 +221,333 @@ priceForm.addEventListener('submit', (event) => {
   priceSettings = { price: Number(data.price), month: data.month };
   localStorage.setItem(priceKey, JSON.stringify(priceSettings));
   render();
+});
+
+let parsedCsvData = [];
+
+const csvFileInput = document.querySelector('#csvFileInput');
+const csvDropZone = document.querySelector('#csvDropZone');
+const csvPreviewContainer = document.querySelector('#csvPreviewContainer');
+const csvPreviewRows = document.querySelector('#csvPreviewRows');
+const csvStats = document.querySelector('#csvStats');
+const csvUploadBtn = document.querySelector('.csvUploadBtn');
+const cancelCsvBtn = document.querySelector('#cancelCsvBtn');
+const confirmCsvBtn = document.querySelector('#confirmCsvBtn');
+const downloadTemplateBtn = document.querySelector('#downloadTemplateBtn');
+
+const validSlots = ['清晨', '上午', '午间', '午后', '傍晚', '晚间', '深夜', '全天'];
+const headerMap = {
+  '日期': 'date', 'date': 'date', '时间': 'date',
+  '电器': 'appliance', '电器名称': 'appliance', 'appliance': 'appliance',
+  '时段': 'slot', '使用时段': 'slot', 'slot': 'slot',
+  '使用时长': 'hours', '时长': 'hours', '小时': 'hours', 'hours': 'hours',
+  '功率': 'watts', '功率(W)': 'watts', '瓦': 'watts', 'watts': 'watts',
+  '备注': 'note', '说明': 'note', 'note': 'note'
+};
+
+function parseCsv(text) {
+  const rows = [];
+  let current = '';
+  let inQuotes = false;
+  const row = [];
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { current += '"'; i++; }
+        else { inQuotes = false; }
+      } else { current += ch; }
+    } else {
+      if (ch === '"') { inQuotes = true; }
+      else if (ch === ',') { row.push(current.trim()); current = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        row.push(current.trim());
+        if (row.some(cell => cell !== '')) rows.push([...row]);
+        row.length = 0; current = '';
+      } else { current += ch; }
+    }
+  }
+  if (current || row.length) { row.push(current.trim()); rows.push(row); }
+  return rows;
+}
+
+function mapHeaders(headerRow) {
+  const mapped = [];
+  for (let i = 0; i < headerRow.length; i++) {
+    const h = headerRow[i].trim();
+    mapped.push(headerMap[h] || null);
+  }
+  return mapped;
+}
+
+function validateRow(row, index, headers) {
+  const errors = [];
+  const warnings = [];
+  const data = {};
+  const fieldStatus = {};
+
+  for (let i = 0; i < headers.length; i++) {
+    const key = headers[i];
+    const value = row[i] || '';
+    if (key) data[key] = value;
+  }
+
+  if (!data.date || data.date.trim() === '') {
+    errors.push('日期不能为空');
+    fieldStatus.date = 'invalid';
+  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(data.date) && !/^\d{4}\/\d{2}\/\d{2}$/.test(data.date)) {
+    errors.push('日期格式错误，应为YYYY-MM-DD或YYYY/MM/DD');
+    fieldStatus.date = 'invalid';
+  } else {
+    data.date = data.date.replace(/\//g, '-');
+    const d = new Date(data.date);
+    if (isNaN(d.getTime())) {
+      errors.push('日期无效');
+      fieldStatus.date = 'invalid';
+    } else {
+      fieldStatus.date = 'valid';
+    }
+  }
+
+  if (!data.appliance || data.appliance.trim() === '') {
+    errors.push('电器名称不能为空');
+    fieldStatus.appliance = 'invalid';
+  } else {
+    fieldStatus.appliance = 'valid';
+  }
+
+  if (!data.slot || data.slot.trim() === '') {
+    errors.push('时段不能为空');
+    fieldStatus.slot = 'invalid';
+  } else if (!validSlots.includes(data.slot.trim())) {
+    errors.push(`时段必须是：${validSlots.join('、')}`);
+    fieldStatus.slot = 'invalid';
+  } else {
+    data.slot = data.slot.trim();
+    fieldStatus.slot = 'valid';
+  }
+
+  if (data.hours === undefined || data.hours === '' || data.hours === null) {
+    errors.push('使用时长不能为空');
+    fieldStatus.hours = 'invalid';
+  } else {
+    const hours = Number(data.hours);
+    if (isNaN(hours)) {
+      errors.push('使用时长必须是数字');
+      fieldStatus.hours = 'invalid';
+    } else if (hours < 0) {
+      errors.push('使用时长不能为负数');
+      fieldStatus.hours = 'invalid';
+    } else if (hours > 24) {
+      errors.push('使用时长不能超过24小时');
+      fieldStatus.hours = 'invalid';
+    } else {
+      data.hours = hours;
+      fieldStatus.hours = 'valid';
+      if (hours === 0) warnings.push('使用时长为0');
+    }
+  }
+
+  if (data.watts === undefined || data.watts === '' || data.watts === null) {
+    errors.push('功率不能为空');
+    fieldStatus.watts = 'invalid';
+  } else {
+    const watts = Number(data.watts);
+    if (isNaN(watts)) {
+      errors.push('功率必须是数字');
+      fieldStatus.watts = 'invalid';
+    } else if (watts < 0) {
+      errors.push('功率不能为负数');
+      fieldStatus.watts = 'invalid';
+    } else if (watts > 10000) {
+      warnings.push('功率数值较大，请确认');
+      fieldStatus.watts = 'warning';
+    } else {
+      data.watts = watts;
+      fieldStatus.watts = 'valid';
+    }
+  }
+
+  if (!data.note || data.note.trim() === '') {
+    fieldStatus.note = 'valid';
+    data.note = '';
+  } else {
+    fieldStatus.note = 'valid';
+  }
+
+  return {
+    rowNumber: index + 1,
+    data,
+    errors,
+    warnings,
+    fieldStatus,
+    isValid: errors.length === 0
+  };
+}
+
+function renderCsvPreview(validatedRows) {
+  const validCount = validatedRows.filter(r => r.isValid).length;
+  const invalidCount = validatedRows.length - validCount;
+
+  csvStats.innerHTML = `
+    <span class="stat total">共 ${validatedRows.length} 条记录</span>
+    <span class="stat valid">有效 ${validCount} 条</span>
+    <span class="stat invalid">无效 ${invalidCount} 条</span>
+  `;
+
+  csvPreviewRows.innerHTML = validatedRows.map(row => {
+    const allErrors = [...row.errors, ...row.warnings].join('；');
+    const statusClass = row.isValid ? 'valid' : 'invalid';
+    const statusText = row.isValid ? '有效' : '无效';
+
+    return `
+      <tr>
+        <td>${row.rowNumber}</td>
+        <td class="${row.fieldStatus.date}">${row.data.date || ''}
+          ${row.fieldStatus.date === 'invalid' ? `<span class="errorTooltip">${row.errors.find(e => e.includes('日期')) || ''}</span>` : ''}
+        </td>
+        <td class="${row.fieldStatus.appliance}">${row.data.appliance || ''}
+          ${row.fieldStatus.appliance === 'invalid' ? `<span class="errorTooltip">${row.errors.find(e => e.includes('电器')) || ''}</span>` : ''}
+        </td>
+        <td class="${row.fieldStatus.slot}">${row.data.slot || ''}
+          ${row.fieldStatus.slot === 'invalid' ? `<span class="errorTooltip">${row.errors.find(e => e.includes('时段')) || ''}</span>` : ''}
+        </td>
+        <td class="${row.fieldStatus.hours}">${row.data.hours !== undefined && row.data.hours !== null ? row.data.hours : ''}
+          ${row.fieldStatus.hours !== 'valid' ? `<span class="errorTooltip">${row.errors.find(e => e.includes('时长')) || row.warnings.find(e => e.includes('时长')) || ''}</span>` : ''}
+        </td>
+        <td class="${row.fieldStatus.watts}">${row.data.watts !== undefined && row.data.watts !== null ? row.data.watts : ''}
+          ${row.fieldStatus.watts !== 'valid' ? `<span class="errorTooltip">${row.errors.find(e => e.includes('功率')) || row.warnings.find(e => e.includes('功率')) || ''}</span>` : ''}
+        </td>
+        <td>${row.data.note || ''}</td>
+        <td>
+          <span class="statusBadge ${statusClass}">${statusText}</span>
+          ${allErrors ? `<span class="errorTooltip">${allErrors}</span>` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  csvPreviewContainer.style.display = 'block';
+  csvDropZone.style.display = 'none';
+}
+
+function handleCsvFile(file) {
+  if (!file.name.endsWith('.csv')) {
+    alert('请选择CSV格式的文件');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const text = e.target.result;
+      const rows = parseCsv(text);
+      if (rows.length < 2) {
+        alert('CSV文件内容为空或格式不正确');
+        return;
+      }
+
+      const headers = mapHeaders(rows[0]);
+      if (!headers.includes('date') || !headers.includes('appliance') || !headers.includes('slot')) {
+        alert('CSV表头不匹配，请确保包含：日期、电器、时段、使用时长、功率等字段');
+        return;
+      }
+
+      const validated = rows.slice(1).map((row, i) => validateRow(row, i, headers));
+      parsedCsvData = validated;
+      renderCsvPreview(validated);
+    } catch (err) {
+      alert('解析CSV文件失败：' + err.message);
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+csvFileInput.addEventListener('change', (e) => {
+  if (e.target.files[0]) handleCsvFile(e.target.files[0]);
+});
+
+csvUploadBtn.addEventListener('click', () => csvFileInput.click());
+
+csvDropZone.addEventListener('click', () => csvFileInput.click());
+
+['dragenter', 'dragover'].forEach(eventName => {
+  csvDropZone.addEventListener(eventName, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    csvDropZone.classList.add('dragOver');
+  });
+});
+
+['dragleave', 'drop'].forEach(eventName => {
+  csvDropZone.addEventListener(eventName, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    csvDropZone.classList.remove('dragOver');
+  });
+});
+
+csvDropZone.addEventListener('drop', (e) => {
+  const file = e.dataTransfer.files[0];
+  if (file) handleCsvFile(file);
+});
+
+cancelCsvBtn.addEventListener('click', () => {
+  parsedCsvData = [];
+  csvPreviewContainer.style.display = 'none';
+  csvDropZone.style.display = 'block';
+  csvFileInput.value = '';
+});
+
+confirmCsvBtn.addEventListener('click', () => {
+  if (!parsedCsvData.length) return;
+
+  const validRows = parsedCsvData.filter(r => r.isValid);
+  if (validRows.length === 0) {
+    alert('没有可导入的有效记录');
+    return;
+  }
+
+  const newRecords = validRows.map(r => ({
+    id: crypto.randomUUID(),
+    date: r.data.date,
+    appliance: r.data.appliance,
+    slot: r.data.slot,
+    hours: r.data.hours,
+    watts: r.data.watts,
+    note: r.data.note || ''
+  }));
+
+  records = [...newRecords, ...records];
+  save();
+  render();
+
+  const invalidCount = parsedCsvData.length - validRows.length;
+  if (invalidCount > 0) {
+    alert(`成功导入 ${validRows.length} 条记录\n${invalidCount} 条无效记录已跳过`);
+  } else {
+    alert(`成功导入 ${validRows.length} 条记录`);
+  }
+
+  parsedCsvData = [];
+  csvPreviewContainer.style.display = 'none';
+  csvDropZone.style.display = 'block';
+  csvFileInput.value = '';
+});
+
+downloadTemplateBtn.addEventListener('click', () => {
+  const template = '日期,电器,时段,使用时长,功率,备注\n2026-06-09,空调,晚间,5.5,900,睡前开启\n2026-06-09,电热水器,傍晚,1.2,1800,洗澡前加热\n';
+  const blob = new Blob(['\uFEFF' + template], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '用电记录模板.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 });
 
 function save() {
