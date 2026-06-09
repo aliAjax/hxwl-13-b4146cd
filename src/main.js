@@ -1,7 +1,6 @@
 import './styles.css';
 
 const key = 'hxwl-13-home-energy';
-const settingsKey = 'hxwl-13-price-settings';
 const seed = [
   { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-04', slot: '晚间', hours: 5.5, watts: 900, note: '睡前开启' },
   { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-04', slot: '傍晚', hours: 1.2, watts: 1800, note: '洗澡前加热' },
@@ -9,10 +8,8 @@ const seed = [
   { id: crypto.randomUUID(), appliance: '台式电脑', date: '2026-06-05', slot: '下午', hours: 4, watts: 260, note: '剪辑文件' },
   { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-06', slot: '午后', hours: 3.5, watts: 900, note: '客厅降温' }
 ];
-const defaultSettings = { price: 0.56, month: new Date().toISOString().slice(0, 7) };
 
 let records = JSON.parse(localStorage.getItem(key) || 'null') || seed;
-let settings = JSON.parse(localStorage.getItem(settingsKey) || 'null') || defaultSettings;
 let editingId = null;
 
 document.querySelector('#app').innerHTML = `
@@ -60,37 +57,11 @@ document.querySelector('#app').innerHTML = `
       <div class="panelHead"><h2>记录列表</h2><input id="search" placeholder="搜索电器或备注" /></div>
       <div class="tableWrap"><table><thead><tr><th>日期</th><th>电器</th><th>时段</th><th>耗电</th><th>备注</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
     </section>
-
-    <section class="layout">
-      <form id="priceForm" class="panel">
-        <h2>月度电费估算</h2>
-        <div class="pair">
-          <div>
-            <label>每度电单价（元）</label>
-            <input name="price" type="number" min="0" step="0.01" placeholder="0.56" required />
-          </div>
-          <div>
-            <label>统计月份</label>
-            <input name="month" type="month" required />
-          </div>
-        </div>
-        <button class="primary">更新设置</button>
-      </form>
-
-      <div>
-        <section class="summary" id="priceSummary"></section>
-        <section class="panel">
-          <h2>每日电费估算</h2>
-          <div class="chart" id="dailyPriceChart"></div>
-        </section>
-      </div>
-    </section>
   </main>
 `;
 
 const form = document.querySelector('#form');
 const search = document.querySelector('#search');
-const priceForm = document.querySelector('#priceForm');
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -108,19 +79,9 @@ document.querySelector('#sample').addEventListener('click', () => {
   save();
   render();
 });
-priceForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  const data = Object.fromEntries(new FormData(priceForm).entries());
-  settings = { price: Number(data.price), month: data.month };
-  saveSettings();
-  render();
-});
 
 function save() {
   localStorage.setItem(key, JSON.stringify(records));
-}
-function saveSettings() {
-  localStorage.setItem(settingsKey, JSON.stringify(settings));
 }
 
 function kwh(record) {
@@ -151,22 +112,6 @@ function render() {
       if (form.elements[name]) form.elements[name].value = value;
     });
   }));
-
-  priceForm.elements.price.value = settings.price;
-  priceForm.elements.month.value = settings.month;
-  const monthRecords = records.filter((record) => record.date.startsWith(settings.month));
-  const monthKwh = monthRecords.reduce((sum, record) => sum + kwh(record), 0);
-  const monthCost = monthKwh * settings.price;
-  const [year, month] = settings.month.split('-').map(Number);
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const dailyCost = monthCost / daysInMonth;
-  document.querySelector('#priceSummary').innerHTML = [
-    ['当月总耗电', `${monthKwh.toFixed(2)}kWh`],
-    ['预计电费', `¥${monthCost.toFixed(2)}`],
-    ['日均费用', `¥${dailyCost.toFixed(2)}`]
-  ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join('');
-  const dailyPriceData = groupSum(monthRecords, 'date').map((item) => ({ label: item.label.slice(8), value: item.value * settings.price }));
-  drawBars('#dailyPriceChart', dailyPriceData, '元');
 }
 
 function groupSum(data, field) {

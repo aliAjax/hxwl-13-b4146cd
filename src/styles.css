@@ -57,7 +57,6 @@ input, textarea, select {
   color: #172033;
 }
 textarea { min-height: 86px; resize: vertical; }
-label { display: block; margin-bottom: 6px; color: #5c6982; font-size: 13px; }
 
 .summary {
   display: grid;
