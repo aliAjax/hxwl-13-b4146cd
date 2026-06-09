@@ -4,12 +4,13 @@ const key = 'hxwl-13-home-energy';
 const priceKey = 'hxwl-13-home-energy-price';
 const applianceKey = 'hxwl-13-home-energy-appliances';
 const goalKey = 'hxwl-13-home-energy-goal';
+const memberKey = 'hxwl-13-home-energy-members';
 const seed = [
-  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-04', slot: '晚间', hours: 5.5, watts: 900, note: '睡前开启' },
-  { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-04', slot: '傍晚', hours: 1.2, watts: 1800, note: '洗澡前加热' },
-  { id: crypto.randomUUID(), appliance: '洗衣机', date: '2026-06-05', slot: '上午', hours: 1, watts: 420, note: '快洗模式' },
-  { id: crypto.randomUUID(), appliance: '台式电脑', date: '2026-06-05', slot: '下午', hours: 4, watts: 260, note: '剪辑文件' },
-  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-06', slot: '午后', hours: 3.5, watts: 900, note: '客厅降温' }
+  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-04', slot: '晚间', hours: 5.5, watts: 900, note: '睡前开启', member: '爸爸' },
+  { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-04', slot: '傍晚', hours: 1.2, watts: 1800, note: '洗澡前加热', member: '妈妈' },
+  { id: crypto.randomUUID(), appliance: '洗衣机', date: '2026-06-05', slot: '上午', hours: 1, watts: 420, note: '快洗模式', member: '妈妈' },
+  { id: crypto.randomUUID(), appliance: '台式电脑', date: '2026-06-05', slot: '下午', hours: 4, watts: 260, note: '剪辑文件', member: '小明' },
+  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-06', slot: '午后', hours: 3.5, watts: 900, note: '客厅降温', member: '' }
 ];
 const applianceSeed = [
   { id: crypto.randomUUID(), name: '空调', watts: 900, slot: '晚间', note: '卧室挂机' },
@@ -19,14 +20,37 @@ const applianceSeed = [
   { id: crypto.randomUUID(), name: '冰箱', watts: 120, slot: '全天', note: '风冷无霜' },
   { id: crypto.randomUUID(), name: '微波炉', watts: 800, slot: '午间', note: '加热饭菜' }
 ];
+const memberSeed = [
+  { id: crypto.randomUUID(), name: '爸爸', note: '主要使用者' },
+  { id: crypto.randomUUID(), name: '妈妈', note: '主要使用者' },
+  { id: crypto.randomUUID(), name: '小明', note: '孩子' },
+  { id: crypto.randomUUID(), name: '小红', note: '孩子' }
+];
 
-let records = JSON.parse(localStorage.getItem(key) || 'null') || seed;
+const UNASSIGNED_LABEL = '未分配';
+
+function getMemberName(record) {
+  return record.member || record.member === '' ? (record.member || UNASSIGNED_LABEL) : UNASSIGNED_LABEL;
+}
+
+function normalizeRecords(records) {
+  return records.map(record => ({
+    ...record,
+    member: record.member !== undefined ? record.member : ''
+  }));
+}
+
+let records = normalizeRecords(JSON.parse(localStorage.getItem(key) || 'null') || seed);
 let appliances = JSON.parse(localStorage.getItem(applianceKey) || 'null') || applianceSeed;
+let members = JSON.parse(localStorage.getItem(memberKey) || 'null') || memberSeed;
 let editingId = null;
 let editingApplianceId = null;
+let editingMemberId = null;
 let priceSettings = JSON.parse(localStorage.getItem(priceKey) || 'null') || { price: 0.56, month: new Date().toISOString().slice(0, 7) };
 let goalSettings = JSON.parse(localStorage.getItem(goalKey) || 'null') || null;
 let lastNotifiedOverTarget = false;
+let batchAssignMode = false;
+let selectedRecordIds = [];
 
 document.querySelector('#app').innerHTML = `
   <main class="shell">
@@ -103,7 +127,7 @@ document.querySelector('#app').innerHTML = `
       </div>
       <div id="csvDropZone" class="csvDropZone">
         <p>拖拽CSV文件到此处，或点击上方按钮选择文件</p>
-        <p class="csvHint">CSV需包含：日期、电器、时段、使用时长、功率、备注</p>
+        <p class="csvHint">CSV需包含：日期、电器、成员（可选）、时段、使用时长、功率、备注</p>
       </div>
       <div id="csvPreviewContainer" style="display:none; margin-top:18px;">
         <div id="csvStats" class="csvStats"></div>
@@ -113,6 +137,7 @@ document.querySelector('#app').innerHTML = `
               <th>行号</th>
               <th>日期</th>
               <th>电器</th>
+              <th>成员</th>
               <th>时段</th>
               <th>使用时长(h)</th>
               <th>功率(W)</th>
@@ -129,6 +154,29 @@ document.querySelector('#app').innerHTML = `
       </div>
     </section>
 
+    <section class="panel" id="memberStatsSection">
+      <div class="panelHead">
+        <h2>👨‍👩‍👧‍👦 家庭成员用电归因</h2>
+        <div class="goalActions">
+          <button id="batchAssignBtn" class="primary">批量分配成员</button>
+        </div>
+      </div>
+      <div id="memberStatsContainer" class="memberStatsGrid"></div>
+    </section>
+
+    <section class="panel" id="memberManagementSection" style="display:none;">
+      <div class="panelHead"><h2>家庭成员管理</h2><button class="primary" id="addMemberBtn">新增成员</button></div>
+      <div id="memberFormContainer" style="display:none; margin-top:16px;">
+        <form id="memberForm" class="layout" style="grid-template-columns: 1fr 1fr auto; gap:12px; margin-bottom:16px;">
+          <input name="name" placeholder="成员姓名" required />
+          <input name="note" placeholder="备注" />
+          <button class="primary">保存</button>
+          <button type="button" id="cancelMemberBtn" style="background:#e4ecff; border:0; border-radius:6px; padding:11px 14px;">取消</button>
+        </form>
+      </div>
+      <div class="tableWrap"><table><thead><tr><th>成员姓名</th><th>备注</th><th></th></tr></thead><tbody id="memberRows"></tbody></table></div>
+    </section>
+
     <section class="layout">
       <form id="form" class="panel">
         <h2>用电记录</h2>
@@ -136,6 +184,9 @@ document.querySelector('#app').innerHTML = `
           <option value="">选择已有电器（可选）</option>
         </select>
         <input name="appliance" placeholder="电器名称" required />
+        <select name="member" id="memberSelect">
+          <option value="">使用成员（可选）</option>
+        </select>
         <input name="date" type="date" required />
         <select name="slot" required>
           <option value="">使用时段</option>
@@ -198,8 +249,21 @@ document.querySelector('#app').innerHTML = `
     </section>
 
     <section class="panel">
-      <div class="panelHead"><h2>记录列表</h2><input id="search" placeholder="搜索电器或备注" /></div>
-      <div class="tableWrap"><table><thead><tr><th>日期</th><th>电器</th><th>时段</th><th>耗电</th><th>备注</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+      <div class="panelHead">
+        <h2>记录列表</h2>
+        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+          <div id="batchAssignControls" style="display:none; gap:12px; align-items:center;">
+            <select id="batchMemberSelect">
+              <option value="">选择分配成员</option>
+            </select>
+            <button id="confirmBatchAssignBtn" class="primary">确认分配</button>
+            <button id="cancelBatchAssignBtn" style="background:#e4ecff; border:0; border-radius:6px; padding:11px 24px;">取消</button>
+            <span id="selectedCount" style="color:#5c6982; font-size:13px;">已选 0 条</span>
+          </div>
+          <input id="search" placeholder="搜索电器或备注" />
+        </div>
+      </div>
+      <div class="tableWrap"><table><thead><tr><th id="selectAllHeader" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th><th>日期</th><th>电器</th><th>成员</th><th>时段</th><th>耗电</th><th>备注</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
     </section>
   </main>
 `;
@@ -208,15 +272,29 @@ const form = document.querySelector('#form');
 const search = document.querySelector('#search');
 const priceForm = document.querySelector('#priceForm');
 const applianceForm = document.querySelector('#applianceForm');
+const memberForm = document.querySelector('#memberForm');
 const applianceSelect = document.querySelector('#applianceSelect');
+const memberSelect = document.querySelector('#memberSelect');
+const batchMemberSelect = document.querySelector('#batchMemberSelect');
 const applianceFormContainer = document.querySelector('#applianceFormContainer');
+const memberFormContainer = document.querySelector('#memberFormContainer');
+const memberManagementSection = document.querySelector('#memberManagementSection');
 const addApplianceBtn = document.querySelector('#addApplianceBtn');
 const cancelApplianceBtn = document.querySelector('#cancelApplianceBtn');
+const addMemberBtn = document.querySelector('#addMemberBtn');
+const cancelMemberBtn = document.querySelector('#cancelMemberBtn');
 const setGoalBtn = document.querySelector('#setGoalBtn');
 const cancelGoalBtn = document.querySelector('#cancelGoalBtn');
 const goalForm = document.querySelector('#goalForm');
 const goalFormContainer = document.querySelector('#goalFormContainer');
 const toastContainer = document.querySelector('#toastContainer');
+const batchAssignBtn = document.querySelector('#batchAssignBtn');
+const batchAssignControls = document.querySelector('#batchAssignControls');
+const cancelBatchAssignBtn = document.querySelector('#cancelBatchAssignBtn');
+const confirmBatchAssignBtn = document.querySelector('#confirmBatchAssignBtn');
+const selectAllHeader = document.querySelector('#selectAllHeader');
+const selectAllCheckbox = document.querySelector('#selectAllCheckbox');
+const selectedCountSpan = document.querySelector('#selectedCount');
 
 priceForm.elements.price.value = priceSettings.price;
 priceForm.elements.month.value = priceSettings.month;
@@ -273,6 +351,95 @@ applianceForm.addEventListener('submit', (event) => {
   applianceForm.reset();
   applianceFormContainer.style.display = 'none';
   save();
+  render();
+});
+
+addMemberBtn.addEventListener('click', () => {
+  editingMemberId = null;
+  memberForm.reset();
+  memberFormContainer.style.display = 'block';
+});
+
+cancelMemberBtn.addEventListener('click', () => {
+  editingMemberId = null;
+  memberForm.reset();
+  memberFormContainer.style.display = 'none';
+});
+
+memberForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(memberForm).entries());
+  const item = { ...data, id: editingMemberId || crypto.randomUUID() };
+  members = editingMemberId ? members.map((m) => (m.id === editingMemberId ? item : m)) : [item, ...members];
+  editingMemberId = null;
+  memberForm.reset();
+  memberFormContainer.style.display = 'none';
+  save();
+  render();
+});
+
+batchAssignBtn.addEventListener('click', () => {
+  batchAssignMode = !batchAssignMode;
+  if (batchAssignMode) {
+    memberManagementSection.style.display = 'block';
+    batchAssignControls.style.display = 'flex';
+    selectAllHeader.style.display = 'table-cell';
+    batchAssignBtn.textContent = '退出批量分配';
+    batchAssignBtn.style.background = '#dc2626';
+  } else {
+    memberManagementSection.style.display = 'none';
+    batchAssignControls.style.display = 'none';
+    selectAllHeader.style.display = 'none';
+    batchAssignBtn.textContent = '批量分配成员';
+    batchAssignBtn.style.background = '';
+    selectedRecordIds = [];
+    selectAllCheckbox.checked = false;
+  }
+  render();
+});
+
+cancelBatchAssignBtn.addEventListener('click', () => {
+  batchAssignMode = false;
+  memberManagementSection.style.display = 'none';
+  batchAssignControls.style.display = 'none';
+  selectAllHeader.style.display = 'none';
+  batchAssignBtn.textContent = '批量分配成员';
+  batchAssignBtn.style.background = '';
+  selectedRecordIds = [];
+  selectAllCheckbox.checked = false;
+  render();
+});
+
+confirmBatchAssignBtn.addEventListener('click', () => {
+  const targetMember = batchMemberSelect.value;
+  if (selectedRecordIds.length === 0) {
+    showToast('warning', '请选择记录', '请先勾选要分配的记录');
+    return;
+  }
+  if (!targetMember) {
+    showToast('warning', '请选择成员', '请选择要分配的家庭成员');
+    return;
+  }
+  records = records.map(record => {
+    if (selectedRecordIds.includes(record.id)) {
+      return { ...record, member: targetMember };
+    }
+    return record;
+  });
+  showToast('success', '分配成功', `已将 ${selectedRecordIds.length} 条记录分配给「${targetMember}」`);
+  selectedRecordIds = [];
+  selectAllCheckbox.checked = false;
+  save();
+  render();
+});
+
+selectAllCheckbox.addEventListener('change', (e) => {
+  const filtered = records.filter((record) => [record.appliance, record.note, record.slot].join(' ').includes(search.value.trim()));
+  if (e.target.checked) {
+    selectedRecordIds = filtered.map(r => r.id);
+  } else {
+    selectedRecordIds = [];
+  }
   render();
 });
 
@@ -347,6 +514,7 @@ const validSlots = ['清晨', '上午', '午间', '午后', '傍晚', '晚间', 
 const headerMap = {
   '日期': 'date', 'date': 'date', '时间': 'date',
   '电器': 'appliance', '电器名称': 'appliance', 'appliance': 'appliance',
+  '成员': 'member', '使用成员': 'member', '家庭成员': 'member', 'member': 'member',
   '时段': 'slot', '使用时段': 'slot', 'slot': 'slot',
   '使用时长': 'hours', '时长': 'hours', '小时': 'hours', 'hours': 'hours',
   '功率': 'watts', '功率(W)': 'watts', '瓦': 'watts', 'watts': 'watts',
@@ -525,6 +693,7 @@ function renderCsvPreview(validatedRows) {
         <td class="${row.fieldStatus.appliance}">${row.data.appliance || ''}
           ${row.fieldStatus.appliance === 'invalid' ? `<span class="errorTooltip">${row.errors.find(e => e.includes('电器')) || ''}</span>` : ''}
         </td>
+        <td>${row.data.member || ''}</td>
         <td class="${row.fieldStatus.slot}">${row.data.slot || ''}
           ${row.fieldStatus.slot === 'invalid' ? `<span class="errorTooltip">${row.errors.find(e => e.includes('时段')) || ''}</span>` : ''}
         </td>
@@ -628,6 +797,7 @@ confirmCsvBtn.addEventListener('click', () => {
     id: crypto.randomUUID(),
     date: r.data.date,
     appliance: r.data.appliance,
+    member: r.data.member || '',
     slot: r.data.slot,
     hours: r.data.hours,
     watts: r.data.watts,
@@ -659,7 +829,7 @@ confirmCsvBtn.addEventListener('click', () => {
 });
 
 downloadTemplateBtn.addEventListener('click', () => {
-  const template = '日期,电器,时段,使用时长,功率,备注\n2026-06-09,空调,晚间,5.5,900,睡前开启\n2026-06-09,电热水器,傍晚,1.2,1800,洗澡前加热\n';
+  const template = '日期,电器,成员,时段,使用时长,功率,备注\n2026-06-09,空调,爸爸,晚间,5.5,900,睡前开启\n2026-06-09,电热水器,妈妈,傍晚,1.2,1800,洗澡前加热\n';
   const blob = new Blob(['\uFEFF' + template], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -810,6 +980,7 @@ function renderEnergyGoal() {
 function save() {
   localStorage.setItem(key, JSON.stringify(records));
   localStorage.setItem(applianceKey, JSON.stringify(appliances));
+  localStorage.setItem(memberKey, JSON.stringify(members));
 }
 
 function kwh(record) {
@@ -875,8 +1046,156 @@ function renderAppliances() {
   }));
 }
 
+function renderMemberSelect() {
+  const memberOptions = members.map((m) => `<option value="${m.name}">${m.name}</option>`).join('');
+  memberSelect.innerHTML = '<option value="">使用成员（可选）</option>' + memberOptions;
+  batchMemberSelect.innerHTML = '<option value="">选择分配成员</option>' + memberOptions;
+}
+
+function renderMembers() {
+  document.querySelector('#memberRows').innerHTML = members.map((m) => `
+    <tr>
+      <td>${m.name}</td>
+      <td>${m.note || ''}</td>
+      <td>
+        <button data-edit-member="${m.id}">编辑</button>
+        <button data-del-member="${m.id}">删除</button>
+      </td>
+    </tr>
+  `).join('');
+
+  document.querySelectorAll('[data-del-member]').forEach((button) => button.addEventListener('click', () => {
+    const memberToDelete = members.find((m) => m.id === button.dataset.delMember);
+    records = records.map(record => {
+      if (record.member === memberToDelete.name) {
+        return { ...record, member: '' };
+      }
+      return record;
+    });
+    members = members.filter((m) => m.id !== button.dataset.delMember);
+    save();
+    render();
+  }));
+
+  document.querySelectorAll('[data-edit-member]').forEach((button) => button.addEventListener('click', () => {
+    const member = members.find((m) => m.id === button.dataset.editMember);
+    const oldName = member.name;
+    editingMemberId = member.id;
+    Object.entries(member).forEach(([name, value]) => {
+      if (memberForm.elements[name]) memberForm.elements[name].value = value;
+    });
+    memberFormContainer.style.display = 'block';
+  }));
+}
+
+function getMemberStats() {
+  const stats = new Map();
+  const allMemberNames = [...members.map(m => m.name), UNASSIGNED_LABEL];
+  
+  allMemberNames.forEach(name => {
+    stats.set(name, {
+      name,
+      totalKwh: 0,
+      totalCost: 0,
+      recordCount: 0,
+      appliances: new Map()
+    });
+  });
+
+  records.forEach(record => {
+    const memberName = getMemberName(record);
+    const memberStat = stats.get(memberName) || stats.get(UNASSIGNED_LABEL);
+    const kwhValue = kwh(record);
+    const cost = kwhValue * priceSettings.price;
+    
+    memberStat.totalKwh += kwhValue;
+    memberStat.totalCost += cost;
+    memberStat.recordCount += 1;
+    
+    const applianceCount = memberStat.appliances.get(record.appliance) || { count: 0, kwh: 0 };
+    applianceCount.count += 1;
+    applianceCount.kwh += kwhValue;
+    memberStat.appliances.set(record.appliance, applianceCount);
+  });
+
+  const totalAllKwh = records.reduce((sum, record) => sum + kwh(record), 0);
+  
+  return [...stats.values()]
+    .filter(s => s.recordCount > 0)
+    .map(s => ({
+      ...s,
+      costPercent: totalAllKwh > 0 ? (s.totalKwh / totalAllKwh * 100) : 0,
+      topAppliances: [...s.appliances.entries()]
+        .sort((a, b) => b[1].kwh - a[1].kwh)
+        .slice(0, 3)
+        .map(([name, data]) => ({ name, count: data.count, kwh: data.kwh })),
+      appliances: undefined
+    }))
+    .sort((a, b) => b.totalKwh - a.totalKwh);
+}
+
+function renderMemberStats() {
+  const stats = getMemberStats();
+  const container = document.querySelector('#memberStatsContainer');
+  
+  if (stats.length === 0) {
+    container.innerHTML = '<p class="empty">暂无数据，请先添加用电记录</p>';
+    return;
+  }
+
+  const colors = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#be185d'];
+  
+  container.innerHTML = stats.map((stat, index) => {
+    const color = colors[index % colors.length];
+    const topAppliancesHtml = stat.topAppliances.length > 0
+      ? stat.topAppliances.map(app => 
+          `<span class="topAppliance">${app.name} (${app.count}次)</span>`
+        ).join('')
+      : '<span class="empty">暂无</span>';
+    
+    return `
+      <div class="memberStatCard">
+        <div class="memberStatHeader" style="border-left-color: ${color};">
+          <div class="memberAvatar" style="background: ${color};">
+            ${stat.name.charAt(0)}
+          </div>
+          <div class="memberInfo">
+            <h3>${stat.name}</h3>
+            <span class="memberRecordCount">${stat.recordCount} 条记录</span>
+          </div>
+        </div>
+        <div class="memberStatBody">
+          <div class="memberStatItem">
+            <span class="statLabel">估算耗电</span>
+            <span class="statValue">${stat.totalKwh.toFixed(2)} kWh</span>
+          </div>
+          <div class="memberStatItem">
+            <span class="statLabel">电费占比</span>
+            <span class="statValue">${stat.costPercent.toFixed(1)}%</span>
+          </div>
+          <div class="memberStatItem">
+            <span class="statLabel">估算费用</span>
+            <span class="statValue">¥${stat.totalCost.toFixed(2)}</span>
+          </div>
+          <div class="memberStatItem fullWidth">
+            <span class="statLabel">高频使用电器</span>
+            <div class="topAppliances">
+              ${topAppliancesHtml}
+            </div>
+          </div>
+        </div>
+        <div class="memberStatProgress">
+          <div class="progressBarBg">
+            <div class="progressBarFill" style="width: ${Math.min(stat.costPercent, 100)}%; background: ${color};"></div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
 function render() {
-  const filtered = records.filter((record) => [record.appliance, record.note, record.slot].join(' ').includes(search.value.trim()));
+  const filtered = records.filter((record) => [record.appliance, record.note, record.slot, getMemberName(record)].join(' ').includes(search.value.trim()));
   const total = records.reduce((sum, record) => sum + kwh(record), 0);
   document.querySelector('#summary').innerHTML = [
     ['总估算耗电', `${total.toFixed(2)}kWh`],
@@ -888,13 +1207,54 @@ function render() {
   drawBars('#slotChart', groupSum(filtered, 'slot'), 'kWh');
   renderMonthly();
   renderApplianceSelect();
+  renderMemberSelect();
   renderAppliances();
+  renderMembers();
+  renderMemberStats();
   renderEnergyGoal();
   checkAndNotifyGoal();
-  document.querySelector('#rows').innerHTML = filtered.sort((a, b) => b.date.localeCompare(a.date)).map((record) => `<tr><td>${record.date}</td><td>${record.appliance}</td><td>${record.slot}</td><td>${kwh(record).toFixed(2)}kWh</td><td>${record.note || ''}</td><td><button data-edit="${record.id}">编辑</button><button data-del="${record.id}">删除</button></td></tr>`).join('');
+
+  selectedCountSpan.textContent = `已选 ${selectedRecordIds.length} 条`;
+  const allSelected = filtered.length > 0 && filtered.every(r => selectedRecordIds.includes(r.id));
+  selectAllCheckbox.checked = allSelected;
+
+  document.querySelector('#rows').innerHTML = filtered.sort((a, b) => b.date.localeCompare(a.date)).map((record) => {
+    const isChecked = selectedRecordIds.includes(record.id);
+    const memberName = getMemberName(record);
+    const memberLabel = memberName === UNASSIGNED_LABEL 
+      ? `<span class="unassignedMember">${UNASSIGNED_LABEL}</span>` 
+      : memberName;
+    
+    return `<tr>
+      ${batchAssignMode ? `<td><input type="checkbox" class="recordCheckbox" data-id="${record.id}" ${isChecked ? 'checked' : ''} /></td>` : ''}
+      <td>${record.date}</td>
+      <td>${record.appliance}</td>
+      <td>${memberLabel}</td>
+      <td>${record.slot}</td>
+      <td>${kwh(record).toFixed(2)}kWh</td>
+      <td>${record.note || ''}</td>
+      <td><button data-edit="${record.id}">编辑</button><button data-del="${record.id}">删除</button></td>
+    </tr>`;
+  }).join('');
+
+  document.querySelectorAll('.recordCheckbox').forEach((checkbox) => {
+    checkbox.addEventListener('change', (e) => {
+      const recordId = e.target.dataset.id;
+      if (e.target.checked) {
+        if (!selectedRecordIds.includes(recordId)) {
+          selectedRecordIds.push(recordId);
+        }
+      } else {
+        selectedRecordIds = selectedRecordIds.filter(id => id !== recordId);
+      }
+      render();
+    });
+  });
+
   document.querySelectorAll('[data-del]').forEach((button) => button.addEventListener('click', () => {
     const beforeTotal = getCurrentMonthTotal();
     records = records.filter((record) => record.id !== button.dataset.del);
+    selectedRecordIds = selectedRecordIds.filter(id => id !== button.dataset.del);
     const afterTotal = getCurrentMonthTotal();
     if (beforeTotal > goalSettings?.target && afterTotal <= goalSettings?.target) {
       lastNotifiedOverTarget = false;
