@@ -46,6 +46,7 @@ let members = JSON.parse(localStorage.getItem(memberKey) || 'null') || memberSee
 let editingId = null;
 let editingApplianceId = null;
 let editingMemberId = null;
+let editingMemberOldName = null;
 let priceSettings = JSON.parse(localStorage.getItem(priceKey) || 'null') || { price: 0.56, month: new Date().toISOString().slice(0, 7) };
 let goalSettings = JSON.parse(localStorage.getItem(goalKey) || 'null') || null;
 let lastNotifiedOverTarget = false;
@@ -356,12 +357,14 @@ applianceForm.addEventListener('submit', (event) => {
 
 addMemberBtn.addEventListener('click', () => {
   editingMemberId = null;
+  editingMemberOldName = null;
   memberForm.reset();
   memberFormContainer.style.display = 'block';
 });
 
 cancelMemberBtn.addEventListener('click', () => {
   editingMemberId = null;
+  editingMemberOldName = null;
   memberForm.reset();
   memberFormContainer.style.display = 'none';
 });
@@ -370,8 +373,14 @@ memberForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(memberForm).entries());
   const item = { ...data, id: editingMemberId || crypto.randomUUID() };
+  if (editingMemberId && editingMemberOldName && editingMemberOldName !== item.name) {
+    records = records.map((record) => (
+      record.member === editingMemberOldName ? { ...record, member: item.name } : record
+    ));
+  }
   members = editingMemberId ? members.map((m) => (m.id === editingMemberId ? item : m)) : [item, ...members];
   editingMemberId = null;
+  editingMemberOldName = null;
   memberForm.reset();
   memberFormContainer.style.display = 'none';
   save();
@@ -1079,8 +1088,8 @@ function renderMembers() {
 
   document.querySelectorAll('[data-edit-member]').forEach((button) => button.addEventListener('click', () => {
     const member = members.find((m) => m.id === button.dataset.editMember);
-    const oldName = member.name;
     editingMemberId = member.id;
+    editingMemberOldName = member.name;
     Object.entries(member).forEach(([name, value]) => {
       if (memberForm.elements[name]) memberForm.elements[name].value = value;
     });
@@ -1091,7 +1100,7 @@ function renderMembers() {
 function getMemberStats() {
   const stats = new Map();
   const allMemberNames = [...members.map(m => m.name), UNASSIGNED_LABEL];
-  
+
   allMemberNames.forEach(name => {
     stats.set(name, {
       name,
@@ -1107,11 +1116,11 @@ function getMemberStats() {
     const memberStat = stats.get(memberName) || stats.get(UNASSIGNED_LABEL);
     const kwhValue = kwh(record);
     const cost = kwhValue * priceSettings.price;
-    
+
     memberStat.totalKwh += kwhValue;
     memberStat.totalCost += cost;
     memberStat.recordCount += 1;
-    
+
     const applianceCount = memberStat.appliances.get(record.appliance) || { count: 0, kwh: 0 };
     applianceCount.count += 1;
     applianceCount.kwh += kwhValue;
@@ -1119,7 +1128,7 @@ function getMemberStats() {
   });
 
   const totalAllKwh = records.reduce((sum, record) => sum + kwh(record), 0);
-  
+
   return [...stats.values()]
     .filter(s => s.recordCount > 0)
     .map(s => ({
@@ -1137,22 +1146,22 @@ function getMemberStats() {
 function renderMemberStats() {
   const stats = getMemberStats();
   const container = document.querySelector('#memberStatsContainer');
-  
+
   if (stats.length === 0) {
     container.innerHTML = '<p class="empty">暂无数据，请先添加用电记录</p>';
     return;
   }
 
   const colors = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#be185d'];
-  
+
   container.innerHTML = stats.map((stat, index) => {
     const color = colors[index % colors.length];
     const topAppliancesHtml = stat.topAppliances.length > 0
-      ? stat.topAppliances.map(app => 
+      ? stat.topAppliances.map(app =>
           `<span class="topAppliance">${app.name} (${app.count}次)</span>`
         ).join('')
       : '<span class="empty">暂无</span>';
-    
+
     return `
       <div class="memberStatCard">
         <div class="memberStatHeader" style="border-left-color: ${color};">
@@ -1221,10 +1230,10 @@ function render() {
   document.querySelector('#rows').innerHTML = filtered.sort((a, b) => b.date.localeCompare(a.date)).map((record) => {
     const isChecked = selectedRecordIds.includes(record.id);
     const memberName = getMemberName(record);
-    const memberLabel = memberName === UNASSIGNED_LABEL 
-      ? `<span class="unassignedMember">${UNASSIGNED_LABEL}</span>` 
+    const memberLabel = memberName === UNASSIGNED_LABEL
+      ? `<span class="unassignedMember">${UNASSIGNED_LABEL}</span>`
       : memberName;
-    
+
     return `<tr>
       ${batchAssignMode ? `<td><input type="checkbox" class="recordCheckbox" data-id="${record.id}" ${isChecked ? 'checked' : ''} /></td>` : ''}
       <td>${record.date}</td>
