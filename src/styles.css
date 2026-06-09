@@ -522,3 +522,481 @@ td button { margin-left: 6px; background: #e4ecff; }
 #memberForm {
   grid-template-columns: 1fr 1fr auto auto !important;
 }
+
+.tariffActions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.tariffHint {
+  color: #5c6982;
+  font-size: 13px;
+  margin: 0 0 16px 0;
+}
+
+.mappingGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.mappingItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #f8faff;
+  border: 1px solid #d5deee;
+  border-radius: 8px;
+}
+
+.mappingSlot {
+  font-weight: 600;
+  color: #172033;
+  min-width: 60px;
+}
+
+.mappingItem select {
+  flex: 1;
+}
+
+.tariffForm {
+  background: #f8faff;
+  border: 1px solid #d5deee;
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tariffForm h3 {
+  margin: 0;
+  color: #172033;
+}
+
+.tariffFormRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.tariffForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tariffForm label span {
+  font-size: 13px;
+  color: #5c6982;
+  font-weight: 500;
+}
+
+.tariffPriceRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.tariffPriceInput {
+  padding: 12px;
+  border-radius: 8px;
+  border: 2px solid;
+}
+
+.tariffPriceInput.peak {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.tariffPriceInput.flat {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.tariffPriceInput.valley {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.tariffHoursRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.tariffHoursInput {
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px dashed;
+}
+
+.tariffHoursInput.peak {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.tariffHoursInput.flat {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.tariffHoursInput.valley {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.tariffList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 16px;
+}
+
+.tariffCard {
+  border: 2px solid #d5deee;
+  border-radius: 12px;
+  background: white;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.tariffCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(32, 47, 78, .12);
+}
+
+.tariffCard.default {
+  border-color: #2563eb;
+}
+
+.tariffCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%);
+  border-bottom: 1px solid #e5ebf5;
+}
+
+.tariffCardTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tariffCardTitle h4 {
+  margin: 0;
+  font-size: 16px;
+  color: #172033;
+}
+
+.defaultBadge {
+  background: #2563eb;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.cheapestBadge {
+  background: #16a34a;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tariffCardActions {
+  display: flex;
+  gap: 8px;
+}
+
+.tariffCardActions button {
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 0;
+  border-radius: 6px;
+  background: #e4ecff;
+  color: #172033;
+  cursor: pointer;
+}
+
+.tariffCardPrices {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 16px;
+  gap: 12px;
+}
+
+.tariffPrice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.tariffPrice.peak {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+}
+
+.tariffPrice.flat {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+}
+
+.tariffPrice.valley {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+}
+
+.tierLabel {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tariffPrice.peak .tierLabel {
+  color: #dc2626;
+}
+
+.tariffPrice.flat .tierLabel {
+  color: #2563eb;
+}
+
+.tariffPrice.valley .tierLabel {
+  color: #16a34a;
+}
+
+.tierPrice {
+  font-size: 18px;
+  font-weight: 700;
+  color: #172033;
+}
+
+.tierHours {
+  font-size: 11px;
+  color: #5c6982;
+  line-height: 1.4;
+}
+
+.comparisonSummary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.comparisonStat {
+  padding: 16px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%);
+  border: 1px solid #d5deee;
+  text-align: center;
+}
+
+.comparisonStat span {
+  display: block;
+  color: #5c6982;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.comparisonStat strong {
+  font-size: 24px;
+  color: #172033;
+}
+
+.comparisonStat.highlight {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-color: #fcd34d;
+}
+
+.comparisonStat.highlight strong {
+  color: #d97706;
+}
+
+.comparisonChart {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.comparisonBar {
+  border: 1px solid #d5deee;
+  border-radius: 10px;
+  padding: 16px;
+  background: white;
+  transition: all 0.2s;
+}
+
+.comparisonBar:hover {
+  border-color: #2563eb;
+}
+
+.comparisonBar.cheapest {
+  border-color: #16a34a;
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+}
+
+.comparisonBar.isDefault {
+  border-width: 2px;
+}
+
+.comparisonBarHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.comparisonBarName {
+  font-weight: 600;
+  color: #172033;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comparisonBarTotal {
+  font-size: 22px;
+  font-weight: 700;
+  color: #172033;
+}
+
+.comparisonBarStack {
+  display: flex;
+  height: 36px;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.comparisonBarSegment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 40px;
+  transition: all 0.3s;
+}
+
+.comparisonBarSegment.peak {
+  background: linear-gradient(90deg, #dc2626 0%, #ef4444 100%);
+}
+
+.comparisonBarSegment.flat {
+  background: linear-gradient(90deg, #2563eb 0%, #3b82f6 100%);
+}
+
+.comparisonBarSegment.valley {
+  background: linear-gradient(90deg, #16a34a 0%, #22c55e 100%);
+}
+
+.comparisonBarFooter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #5c6982;
+}
+
+.comparisonBarFooter .saving {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.comparisonBarFooter .extra {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.comparisonLegend {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e5ebf5;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #5c6982;
+}
+
+.legendColor {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.legendColor.peak {
+  background: #dc2626;
+}
+
+.legendColor.flat {
+  background: #2563eb;
+}
+
+.legendColor.valley {
+  background: #16a34a;
+}
+
+.tariffDetailTable {
+  min-width: 600px;
+}
+
+.tariffDetailTable th {
+  background: #f8faff;
+  font-weight: 600;
+}
+
+.tariffDetailTable td strong {
+  color: #172033;
+}
+
+.tierBadge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .tariffPriceRow,
+  .tariffHoursRow,
+  .tariffCardPrices,
+  .comparisonSummary {
+    grid-template-columns: 1fr !important;
+  }
+
+  .tariffFormRow {
+    grid-template-columns: 1fr;
+  }
+
+  .tariffList {
+    grid-template-columns: 1fr;
+  }
+
+  .tariffActions {
+    flex-wrap: wrap;
+  }
+
+  .comparisonBarFooter {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}

@@ -5,6 +5,8 @@ const priceKey = 'hxwl-13-home-energy-price';
 const applianceKey = 'hxwl-13-home-energy-appliances';
 const goalKey = 'hxwl-13-home-energy-goal';
 const memberKey = 'hxwl-13-home-energy-members';
+const tariffKey = 'hxwl-13-home-energy-tariffs';
+const slotMappingKey = 'hxwl-13-home-energy-slot-mapping';
 const seed = [
   { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-04', slot: '晚间', hours: 5.5, watts: 900, note: '睡前开启', member: '爸爸' },
   { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-04', slot: '傍晚', hours: 1.2, watts: 1800, note: '洗澡前加热', member: '妈妈' },
@@ -26,6 +28,42 @@ const memberSeed = [
   { id: crypto.randomUUID(), name: '小明', note: '孩子' },
   { id: crypto.randomUUID(), name: '小红', note: '孩子' }
 ];
+
+const tariffSeed = [
+  {
+    id: crypto.randomUUID(),
+    name: '居民阶梯电价',
+    peakPrice: 0.82,
+    flatPrice: 0.56,
+    valleyPrice: 0.28,
+    peakHours: ['10:00-12:00', '19:00-21:00'],
+    flatHours: ['08:00-10:00', '12:00-19:00', '21:00-23:00'],
+    valleyHours: ['00:00-08:00', '23:00-24:00'],
+    isDefault: true
+  },
+  {
+    id: crypto.randomUUID(),
+    name: '工商业分时电价',
+    peakPrice: 1.25,
+    flatPrice: 0.78,
+    valleyPrice: 0.35,
+    peakHours: ['09:00-12:00', '18:00-21:00'],
+    flatHours: ['08:00-09:00', '12:00-18:00', '21:00-22:00'],
+    valleyHours: ['00:00-08:00', '22:00-24:00'],
+    isDefault: false
+  }
+];
+
+const slotMappingSeed = {
+  '清晨': 'valley',
+  '上午': 'flat',
+  '午间': 'peak',
+  '午后': 'flat',
+  '傍晚': 'peak',
+  '晚间': 'peak',
+  '深夜': 'valley',
+  '全天': 'flat'
+};
 
 const UNASSIGNED_LABEL = '未分配';
 
@@ -52,6 +90,12 @@ let goalSettings = JSON.parse(localStorage.getItem(goalKey) || 'null') || null;
 let lastNotifiedOverTarget = false;
 let batchAssignMode = false;
 let selectedRecordIds = [];
+let tariffs = JSON.parse(localStorage.getItem(tariffKey) || 'null') || tariffSeed;
+let slotMapping = JSON.parse(localStorage.getItem(slotMappingKey) || 'null') || slotMappingSeed;
+let editingTariffId = null;
+let selectedTariffIds = [];
+let showTariffForm = false;
+let showMappingConfig = false;
 
 document.querySelector('#app').innerHTML = `
   <main class="shell">
@@ -249,6 +293,118 @@ document.querySelector('#app').innerHTML = `
       </div>
     </section>
 
+    <section class="panel" id="tariffSimulatorSection">
+      <div class="panelHead">
+        <h2>⚡ 分时电价模拟器</h2>
+        <div class="tariffActions">
+          <button id="toggleMappingConfigBtn" class="primary">时段映射配置</button>
+          <button id="addTariffBtn" class="primary">新增电价方案</button>
+        </div>
+      </div>
+
+      <div id="mappingConfigContainer" style="display:none; margin-top:16px;">
+        <div class="panelHead" style="margin-bottom:12px;">
+          <h3 style="margin:0;">时段映射规则</h3>
+          <button id="closeMappingConfigBtn" style="background:#e4ecff; border:0; border-radius:6px; padding:8px 16px;">关闭</button>
+        </div>
+        <p class="tariffHint">将现有记录时段映射到电价时段（峰/平/谷），用于费用计算</p>
+        <div class="mappingGrid" id="mappingGrid"></div>
+        <div style="margin-top:12px; display:flex; gap:12px; justify-content:flex-end;">
+          <button id="resetMappingBtn" style="background:#e4ecff; border:0; border-radius:6px; padding:10px 20px;">重置默认</button>
+          <button id="saveMappingBtn" class="primary">保存映射</button>
+        </div>
+      </div>
+
+      <div id="tariffFormContainer" style="display:none; margin-top:16px;">
+        <form id="tariffForm" class="tariffForm">
+          <h3 id="tariffFormTitle">新增电价方案</h3>
+          <div class="tariffFormRow">
+            <label>
+              <span>方案名称</span>
+              <input name="name" type="text" placeholder="例如：居民分时电价" required />
+            </label>
+            <label style="display:flex; align-items:center; gap:8px;">
+              <input name="isDefault" type="checkbox" />
+              <span style="margin:0;">设为默认方案</span>
+            </label>
+          </div>
+          <div class="tariffPriceRow">
+            <label class="tariffPriceInput peak">
+              <span>峰时段电价 (元/kWh)</span>
+              <input name="peakPrice" type="number" min="0" step="0.01" placeholder="0.82" required />
+            </label>
+            <label class="tariffPriceInput flat">
+              <span>平时段电价 (元/kWh)</span>
+              <input name="flatPrice" type="number" min="0" step="0.01" placeholder="0.56" required />
+            </label>
+            <label class="tariffPriceInput valley">
+              <span>谷时段电价 (元/kWh)</span>
+              <input name="valleyPrice" type="number" min="0" step="0.01" placeholder="0.28" required />
+            </label>
+          </div>
+          <div class="tariffHoursRow">
+            <label class="tariffHoursInput peak">
+              <span>峰时段 (HH:MM-HH:MM，多个用逗号分隔)</span>
+              <input name="peakHours" type="text" placeholder="10:00-12:00,19:00-21:00" required />
+            </label>
+            <label class="tariffHoursInput flat">
+              <span>平时段 (HH:MM-HH:MM，多个用逗号分隔)</span>
+              <input name="flatHours" type="text" placeholder="08:00-10:00,12:00-19:00" required />
+            </label>
+            <label class="tariffHoursInput valley">
+              <span>谷时段 (HH:MM-HH:MM，多个用逗号分隔)</span>
+              <input name="valleyHours" type="text" placeholder="00:00-08:00,23:00-24:00" required />
+            </label>
+          </div>
+          <div class="tariffFormRow" style="justify-content:flex-end;">
+            <button type="button" id="cancelTariffBtn" style="background:#e4ecff; border:0; border-radius:6px; padding:11px 24px;">取消</button>
+            <button type="submit" class="primary">保存方案</button>
+          </div>
+        </form>
+      </div>
+
+      <div id="tariffListContainer" style="margin-top:16px;">
+        <div class="tariffList" id="tariffList"></div>
+      </div>
+
+      <div id="tariffComparisonSection" style="margin-top:24px;">
+        <div class="panelHead" style="margin-bottom:12px;">
+          <h3 style="margin:0;">📊 多方案费用对比</h3>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <label style="font-size:13px; color:#5c6982;">对比月份：</label>
+            <select id="comparisonMonth" style="width:auto; padding:8px 12px;">
+            </select>
+          </div>
+        </div>
+        <div id="tariffComparisonContainer"></div>
+      </div>
+
+      <div id="tariffDetailSection" style="margin-top:24px;">
+        <div class="panelHead" style="margin-bottom:12px;">
+          <h3 style="margin:0;">📋 记录明细费用</h3>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <label style="font-size:13px; color:#5c6982;">电价方案：</label>
+            <select id="detailTariffSelect" style="width:auto; padding:8px 12px;">
+            </select>
+          </div>
+        </div>
+        <div class="tableWrap"><table class="tariffDetailTable">
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>电器</th>
+              <th>时段</th>
+              <th>映射时段</th>
+              <th>耗电</th>
+              <th>电价</th>
+              <th>费用</th>
+            </tr>
+          </thead>
+          <tbody id="tariffDetailRows"></tbody>
+        </table></div>
+      </div>
+    </section>
+
     <section class="panel">
       <div class="panelHead">
         <h2>记录列表</h2>
@@ -296,6 +452,23 @@ const confirmBatchAssignBtn = document.querySelector('#confirmBatchAssignBtn');
 const selectAllHeader = document.querySelector('#selectAllHeader');
 const selectAllCheckbox = document.querySelector('#selectAllCheckbox');
 const selectedCountSpan = document.querySelector('#selectedCount');
+
+const tariffForm = document.querySelector('#tariffForm');
+const tariffFormContainer = document.querySelector('#tariffFormContainer');
+const tariffFormTitle = document.querySelector('#tariffFormTitle');
+const addTariffBtn = document.querySelector('#addTariffBtn');
+const cancelTariffBtn = document.querySelector('#cancelTariffBtn');
+const toggleMappingConfigBtn = document.querySelector('#toggleMappingConfigBtn');
+const closeMappingConfigBtn = document.querySelector('#closeMappingConfigBtn');
+const mappingConfigContainer = document.querySelector('#mappingConfigContainer');
+const saveMappingBtn = document.querySelector('#saveMappingBtn');
+const resetMappingBtn = document.querySelector('#resetMappingBtn');
+const comparisonMonthSelect = document.querySelector('#comparisonMonth');
+const detailTariffSelect = document.querySelector('#detailTariffSelect');
+const mappingGrid = document.querySelector('#mappingGrid');
+const tariffList = document.querySelector('#tariffList');
+const tariffComparisonContainer = document.querySelector('#tariffComparisonContainer');
+const tariffDetailRows = document.querySelector('#tariffDetailRows');
 
 priceForm.elements.price.value = priceSettings.price;
 priceForm.elements.month.value = priceSettings.month;
@@ -850,6 +1023,399 @@ downloadTemplateBtn.addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
+addTariffBtn.addEventListener('click', () => {
+  editingTariffId = null;
+  tariffForm.reset();
+  tariffFormTitle.textContent = '新增电价方案';
+  tariffFormContainer.style.display = 'block';
+});
+
+cancelTariffBtn.addEventListener('click', () => {
+  editingTariffId = null;
+  tariffForm.reset();
+  tariffFormContainer.style.display = 'none';
+});
+
+tariffForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(tariffForm).entries());
+
+  const peakHours = data.peakHours.split(',').map(h => h.trim()).filter(h => h);
+  const flatHours = data.flatHours.split(',').map(h => h.trim()).filter(h => h);
+  const valleyHours = data.valleyHours.split(',').map(h => h.trim()).filter(h => h);
+
+  if (!validateTimeRanges(peakHours) || !validateTimeRanges(flatHours) || !validateTimeRanges(valleyHours)) {
+    showToast('error', '时间格式错误', '请使用正确的时间格式，例如：10:00-12:00');
+    return;
+  }
+
+  const item = {
+    id: editingTariffId || crypto.randomUUID(),
+    name: data.name,
+    peakPrice: Number(data.peakPrice),
+    flatPrice: Number(data.flatPrice),
+    valleyPrice: Number(data.valleyPrice),
+    peakHours,
+    flatHours,
+    valleyHours,
+    isDefault: data.isDefault === 'on'
+  };
+
+  if (item.isDefault) {
+    tariffs = tariffs.map(t => ({ ...t, isDefault: false }));
+  }
+
+  tariffs = editingTariffId
+    ? tariffs.map((t) => (t.id === editingTariffId ? item : t))
+    : [item, ...tariffs];
+
+  editingTariffId = null;
+  tariffForm.reset();
+  tariffFormContainer.style.display = 'none';
+  saveTariffData();
+  render();
+  showToast('success', '保存成功', `电价方案「${item.name}」已保存`);
+});
+
+toggleMappingConfigBtn.addEventListener('click', () => {
+  showMappingConfig = !showMappingConfig;
+  mappingConfigContainer.style.display = showMappingConfig ? 'block' : 'none';
+  if (showMappingConfig) {
+    renderMappingConfig();
+  }
+});
+
+closeMappingConfigBtn.addEventListener('click', () => {
+  showMappingConfig = false;
+  mappingConfigContainer.style.display = 'none';
+});
+
+saveMappingBtn.addEventListener('click', () => {
+  const selects = mappingGrid.querySelectorAll('select');
+  const newMapping = {};
+  selects.forEach(select => {
+    newMapping[select.dataset.slot] = select.value;
+  });
+  slotMapping = newMapping;
+  localStorage.setItem(slotMappingKey, JSON.stringify(slotMapping));
+  saveMapping();
+  render();
+  showToast('success', '保存成功', '时段映射规则已保存');
+});
+
+resetMappingBtn.addEventListener('click', () => {
+  if (confirm('确定要重置为默认映射规则吗？')) {
+    slotMapping = { ...slotMappingSeed };
+    localStorage.setItem(slotMappingKey, JSON.stringify(slotMapping));
+    renderMappingConfig();
+    render();
+    showToast('success', '重置成功', '已恢复默认时段映射规则');
+  }
+});
+
+comparisonMonthSelect.addEventListener('change', renderTariffComparison);
+detailTariffSelect.addEventListener('change', renderTariffDetail);
+
+function validateTimeRanges(ranges) {
+  const timeRegex = /^\d{2}:\d{2}-\d{2}:\d{2}$/;
+  return ranges.every(range => timeRegex.test(range));
+}
+
+function getSlotTier(slot) {
+  return slotMapping[slot] || 'flat';
+}
+
+function getTierPrice(tariff, tier) {
+  switch (tier) {
+    case 'peak': return tariff.peakPrice;
+    case 'valley': return tariff.valleyPrice;
+    default: return tariff.flatPrice;
+  }
+}
+
+function getTierName(tier) {
+  switch (tier) {
+    case 'peak': return '峰';
+    case 'valley': return '谷';
+    default: return '平';
+  }
+}
+
+function getTierColor(tier) {
+  switch (tier) {
+    case 'peak': return '#dc2626';
+    case 'valley': return '#16a34a';
+    default: return '#2563eb';
+  }
+}
+
+function calculateRecordCost(record, tariff) {
+  const kwhValue = kwh(record);
+  const tier = getSlotTier(record.slot);
+  const price = getTierPrice(tariff, tier);
+  return {
+    kwh: kwhValue,
+    tier,
+    price,
+    cost: kwhValue * price
+  };
+}
+
+function calculateMonthCost(monthRecords, tariff) {
+  let peakKwh = 0, flatKwh = 0, valleyKwh = 0;
+  let peakCost = 0, flatCost = 0, valleyCost = 0;
+
+  monthRecords.forEach(record => {
+    const result = calculateRecordCost(record, tariff);
+    switch (result.tier) {
+      case 'peak':
+        peakKwh += result.kwh;
+        peakCost += result.cost;
+        break;
+      case 'valley':
+        valleyKwh += result.kwh;
+        valleyCost += result.cost;
+        break;
+      default:
+        flatKwh += result.kwh;
+        flatCost += result.cost;
+        break;
+    }
+  });
+
+  return {
+    peakKwh, peakCost,
+    flatKwh, flatCost,
+    valleyKwh, valleyCost,
+    totalKwh: peakKwh + flatKwh + valleyKwh,
+    totalCost: peakCost + flatCost + valleyCost
+  };
+}
+
+function saveTariffData() {
+  localStorage.setItem(tariffKey, JSON.stringify(tariffs));
+}
+
+function renderMappingConfig() {
+  const slots = ['清晨', '上午', '午间', '午后', '傍晚', '晚间', '深夜', '全天'];
+  mappingGrid.innerHTML = slots.map(function(slot) {
+    return '<div class="mappingItem">' +
+      '<span class="mappingSlot">' + slot + '</span>' +
+      '<select data-slot="' + slot + '">' +
+        '<option value="peak" ' + (slotMapping[slot] === 'peak' ? 'selected' : '') + '>峰时段</option>' +
+        '<option value="flat" ' + (slotMapping[slot] === 'flat' ? 'selected' : '') + '>平时段</option>' +
+        '<option value="valley" ' + (slotMapping[slot] === 'valley' ? 'selected' : '') + '>谷时段</option>' +
+      '</select>' +
+    '</div>';
+  }).join('');
+}
+
+function renderTariffList() {
+  if (tariffs.length === 0) {
+    tariffList.innerHTML = '<p class="empty">暂无电价方案，请先添加</p>';
+    return;
+  }
+
+  tariffList.innerHTML = tariffs.map(function(tariff) {
+    return '<div class="tariffCard ' + (tariff.isDefault ? 'default' : '') + '">' +
+      '<div class="tariffCardHeader">' +
+        '<div class="tariffCardTitle">' +
+          '<h4>' + tariff.name + '</h4>' +
+          (tariff.isDefault ? '<span class="defaultBadge">默认</span>' : '') +
+        '</div>' +
+        '<div class="tariffCardActions">' +
+          '<button data-edit-tariff="' + tariff.id + '">编辑</button>' +
+          '<button data-del-tariff="' + tariff.id + '" style="background:#fee2e2; color:#dc2626;">删除</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="tariffCardPrices">' +
+        '<div class="tariffPrice peak">' +
+          '<span class="tierLabel">峰</span>' +
+          '<span class="tierPrice">¥' + tariff.peakPrice.toFixed(2) + '/kWh</span>' +
+          '<span class="tierHours">' + tariff.peakHours.join('、') + '</span>' +
+        '</div>' +
+        '<div class="tariffPrice flat">' +
+          '<span class="tierLabel">平</span>' +
+          '<span class="tierPrice">¥' + tariff.flatPrice.toFixed(2) + '/kWh</span>' +
+          '<span class="tierHours">' + tariff.flatHours.join('、') + '</span>' +
+        '</div>' +
+        '<div class="tariffPrice valley">' +
+          '<span class="tierLabel">谷</span>' +
+          '<span class="tierPrice">¥' + tariff.valleyPrice.toFixed(2) + '/kWh</span>' +
+          '<span class="tierHours">' + tariff.valleyHours.join('、') + '</span>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  document.querySelectorAll('[data-del-tariff]').forEach(function(button) { button.addEventListener('click', function() {
+    const tariffToDelete = tariffs.find(function(t) { return t.id === button.dataset.delTariff; });
+    if (confirm('确定要删除电价方案「' + tariffToDelete.name + '」吗？')) {
+      tariffs = tariffs.filter(function(t) { return t.id !== button.dataset.delTariff; });
+      if (tariffToDelete.isDefault && tariffs.length > 0) {
+        tariffs[0].isDefault = true;
+      }
+      saveTariffData();
+      render();
+      showToast('success', '删除成功', '已删除电价方案「' + tariffToDelete.name + '」');
+    }
+  });});
+
+  document.querySelectorAll('[data-edit-tariff]').forEach(function(button) { button.addEventListener('click', function() {
+    const tariff = tariffs.find(function(t) { return t.id === button.dataset.editTariff; });
+    editingTariffId = tariff.id;
+    tariffFormTitle.textContent = '编辑电价方案';
+    tariffForm.elements.name.value = tariff.name;
+    tariffForm.elements.peakPrice.value = tariff.peakPrice;
+    tariffForm.elements.flatPrice.value = tariff.flatPrice;
+    tariffForm.elements.valleyPrice.value = tariff.valleyPrice;
+    tariffForm.elements.peakHours.value = tariff.peakHours.join(',');
+    tariffForm.elements.flatHours.value = tariff.flatHours.join(',');
+    tariffForm.elements.valleyHours.value = tariff.valleyHours.join(',');
+    tariffForm.elements.isDefault.checked = tariff.isDefault;
+    tariffFormContainer.style.display = 'block';
+  });});
+}
+
+function renderTariffSelects() {
+  const options = tariffs.map(function(t) {
+    return '<option value="' + t.id + '">' + t.name + (t.isDefault ? ' (默认)' : '') + '</option>';
+  }).join('');
+  detailTariffSelect.innerHTML = options;
+
+  const months = [...new Set(records.map(function(r) { return r.date.slice(0, 7); }))].sort().reverse();
+  comparisonMonthSelect.innerHTML = months.map(function(m) { return '<option value="' + m + '">' + m + '</option>'; }).join('');
+  if (months.length > 0 && !comparisonMonthSelect.value) {
+    comparisonMonthSelect.value = months[0];
+  }
+}
+
+function renderTariffComparison() {
+  const month = comparisonMonthSelect.value;
+  if (!month) {
+    tariffComparisonContainer.innerHTML = '<p class="empty">暂无数据</p>';
+    return;
+  }
+
+  const monthRecords = records.filter(r => r.date.startsWith(month));
+  if (monthRecords.length === 0) {
+    tariffComparisonContainer.innerHTML = '<p class="empty">该月份暂无用电记录</p>';
+    return;
+  }
+
+  const results = tariffs.map(tariff => ({
+    tariff,
+    ...calculateMonthCost(monthRecords, tariff)
+  }));
+
+  const minCost = Math.min(...results.map(r => r.totalCost));
+  const maxCost = Math.max(...results.map(r => r.totalCost));
+  const savings = maxCost - minCost;
+
+  const defaultTariff = tariffs.find(t => t.isDefault) || tariffs[0];
+  const defaultResult = results.find(r => r.tariff.id === defaultTariff.id);
+
+  const barsHtml = results.map(function(result) {
+    const isCheapest = result.totalCost === minCost;
+    const isDefault = result.tariff.isDefault;
+    const savingVsDefault = defaultResult.totalCost - result.totalCost;
+    
+    let barHtml = '<div class="comparisonBar ' + (isCheapest ? 'cheapest' : '') + ' ' + (isDefault ? 'isDefault' : '') + '">' +
+      '<div class="comparisonBarHeader">' +
+        '<span class="comparisonBarName">' +
+          result.tariff.name +
+          (isDefault ? '<span class="defaultBadge">默认</span>' : '') +
+          (isCheapest ? '<span class="cheapestBadge">最省</span>' : '') +
+        '</span>' +
+        '<span class="comparisonBarTotal">¥' + result.totalCost.toFixed(2) + '</span>' +
+      '</div>' +
+      '<div class="comparisonBarStack">' +
+        '<div class="comparisonBarSegment peak" style="width: ' + (result.peakCost / result.totalCost * 100).toFixed(1) + '%">' +
+          '<span>¥' + result.peakCost.toFixed(2) + '</span>' +
+        '</div>' +
+        '<div class="comparisonBarSegment flat" style="width: ' + (result.flatCost / result.totalCost * 100).toFixed(1) + '%">' +
+          '<span>¥' + result.flatCost.toFixed(2) + '</span>' +
+        '</div>' +
+        '<div class="comparisonBarSegment valley" style="width: ' + (result.valleyCost / result.totalCost * 100).toFixed(1) + '%">' +
+          '<span>¥' + result.valleyCost.toFixed(2) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="comparisonBarFooter">' +
+        '<span>峰: ' + result.peakKwh.toFixed(1) + 'kWh · 平: ' + result.flatKwh.toFixed(1) + 'kWh · 谷: ' + result.valleyKwh.toFixed(1) + 'kWh</span>';
+    
+    if (savingVsDefault !== 0) {
+      barHtml += '<span class="' + (savingVsDefault > 0 ? 'saving' : 'extra') + '">' +
+        (savingVsDefault > 0 ? '比默认省' : '比默认多') + ' ¥' + Math.abs(savingVsDefault).toFixed(2) +
+      '</span>';
+    }
+    
+    barHtml += '</div></div>';
+    return barHtml;
+  }).join('');
+
+  tariffComparisonContainer.innerHTML = 
+    '<div class="comparisonSummary">' +
+      '<div class="comparisonStat">' +
+        '<span>对比月份</span>' +
+        '<strong>' + month + '</strong>' +
+      '</div>' +
+      '<div class="comparisonStat">' +
+        '<span>用电记录</span>' +
+        '<strong>' + monthRecords.length + ' 条</strong>' +
+      '</div>' +
+      '<div class="comparisonStat">' +
+        '<span>总耗电量</span>' +
+        '<strong>' + defaultResult.totalKwh.toFixed(2) + ' kWh</strong>' +
+      '</div>' +
+      '<div class="comparisonStat highlight">' +
+        '<span>最大差价</span>' +
+        '<strong>¥' + savings.toFixed(2) + '</strong>' +
+      '</div>' +
+    '</div>' +
+    '<div class="comparisonChart">' +
+      barsHtml +
+    '</div>' +
+    '<div class="comparisonLegend">' +
+      '<span class="legendItem"><span class="legendColor peak"></span>峰时段</span>' +
+      '<span class="legendItem"><span class="legendColor flat"></span>平时段</span>' +
+      '<span class="legendItem"><span class="legendColor valley"></span>谷时段</span>' +
+    '</div>';
+}
+
+function renderTariffDetail() {
+  const tariffId = detailTariffSelect.value;
+  const tariff = tariffs.find(function(t) { return t.id === tariffId; });
+  if (!tariff) {
+    tariffDetailRows.innerHTML = '<tr><td colspan="7" class="empty">暂无数据</td></tr>';
+    return;
+  }
+
+  const month = comparisonMonthSelect.value;
+  const monthRecords = records.filter(function(r) { return r.date.startsWith(month); });
+
+  if (monthRecords.length === 0) {
+    tariffDetailRows.innerHTML = '<tr><td colspan="7" class="empty">该月份暂无用电记录</td></tr>';
+    return;
+  }
+
+  tariffDetailRows.innerHTML = monthRecords
+    .sort(function(a, b) { return b.date.localeCompare(a.date); })
+    .map(function(record) {
+      const result = calculateRecordCost(record, tariff);
+      const tierName = getTierName(result.tier);
+      const tierColor = getTierColor(result.tier);
+      return '<tr>' +
+        '<td>' + record.date + '</td>' +
+        '<td>' + record.appliance + '</td>' +
+        '<td>' + record.slot + '</td>' +
+        '<td><span class="tierBadge" style="background: ' + tierColor + '20; color: ' + tierColor + ';">' + tierName + '</span></td>' +
+        '<td>' + result.kwh.toFixed(2) + 'kWh</td>' +
+        '<td>¥' + result.price.toFixed(2) + '/kWh</td>' +
+        '<td><strong>¥' + result.cost.toFixed(2) + '</strong></td>' +
+      '</tr>';
+    }).join('');
+}
+
 function showToast(type, title, message, duration = 4000) {
   const icons = {
     success: '✅',
@@ -859,15 +1425,14 @@ function showToast(type, title, message, duration = 4000) {
   };
 
   const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  toast.innerHTML = `
-    <span class="toastIcon">${icons[type] || icons.info}</span>
-    <div class="toastContent">
-      <p class="toastTitle">${title}</p>
-      <p class="toastMessage">${message}</p>
-    </div>
-    <button class="toastClose" aria-label="关闭">×</button>
-  `;
+  toast.className = 'toast ' + type;
+  toast.innerHTML = 
+    '<span class="toastIcon">' + (icons[type] || icons.info) + '</span>' +
+    '<div class="toastContent">' +
+      '<p class="toastTitle">' + title + '</p>' +
+      '<p class="toastMessage">' + message + '</p>' +
+    '</div>' +
+    '<button class="toastClose" aria-label="关闭">×</button>';
 
   toastContainer.appendChild(toast);
 
@@ -992,6 +1557,10 @@ function save() {
   localStorage.setItem(memberKey, JSON.stringify(members));
 }
 
+function saveMapping() {
+  localStorage.setItem(slotMappingKey, JSON.stringify(slotMapping));
+}
+
 function kwh(record) {
   return record.hours * record.watts / 1000;
 }
@@ -1011,67 +1580,70 @@ function renderMonthly() {
   const daysWithData = [...new Set(monthlyRecords.map((r) => r.date))].length;
 
   document.querySelector('#monthlySummary').innerHTML = [
-    ['当月总耗电', `${monthlyTotal.toFixed(2)}kWh`],
-    ['预计电费', `¥${estimatedCost.toFixed(2)}`],
-    ['日均费用', `¥${dailyAverage.toFixed(2)}`],
-    ['活跃天数', `${daysWithData}/${daysInMonth}天`]
-  ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join('');
+    ['当月总耗电', monthlyTotal.toFixed(2) + 'kWh'],
+    ['预计电费', '¥' + estimatedCost.toFixed(2)],
+    ['日均费用', '¥' + dailyAverage.toFixed(2)],
+    ['活跃天数', daysWithData + '/' + daysInMonth + '天']
+  ].map(function(item) { 
+    return '<article><span>' + item[0] + '</span><strong>' + item[1] + '</strong></article>'; 
+  }).join('');
 
-  drawBars('#monthlyChart', groupSum(monthlyRecords, 'date').sort((a, b) => a.label.localeCompare(b.label)), 'kWh');
+  drawBars('#monthlyChart', groupSum(monthlyRecords, 'date').sort(function(a, b) { return a.label.localeCompare(b.label); }), 'kWh');
 }
 
 function renderApplianceSelect() {
   applianceSelect.innerHTML = '<option value="">选择已有电器（可选）</option>' +
-    appliances.map((a) => `<option value="${a.id}">${a.name} (${a.watts}W)</option>`).join('');
+    appliances.map(function(a) { return '<option value="' + a.id + '">' + a.name + ' (' + a.watts + 'W)</option>'; }).join('');
 }
 
 function renderAppliances() {
-  document.querySelector('#applianceRows').innerHTML = appliances.map((a) => `
-    <tr>
-      <td>${a.name}</td>
-      <td>${a.watts}W</td>
-      <td>${a.slot}</td>
-      <td>${a.note || ''}</td>
-      <td>
-        <button data-edit-appliance="${a.id}">编辑</button>
-        <button data-del-appliance="${a.id}">删除</button>
-      </td>
-    </tr>
-  `).join('');
+  document.querySelector('#applianceRows').innerHTML = appliances.map(function(a) {
+    return '<tr>' +
+      '<td>' + a.name + '</td>' +
+      '<td>' + a.watts + 'W</td>' +
+      '<td>' + a.slot + '</td>' +
+      '<td>' + (a.note || '') + '</td>' +
+      '<td>' +
+        '<button data-edit-appliance="' + a.id + '">编辑</button>' +
+        '<button data-del-appliance="' + a.id + '">删除</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
 
-  document.querySelectorAll('[data-del-appliance]').forEach((button) => button.addEventListener('click', () => {
-    appliances = appliances.filter((a) => a.id !== button.dataset.delAppliance);
+  document.querySelectorAll('[data-del-appliance]').forEach(function(button) { button.addEventListener('click', function() {
+    appliances = appliances.filter(function(a) { return a.id !== button.dataset.delAppliance; });
     save();
     render();
-  }));
+  });});
 
-  document.querySelectorAll('[data-edit-appliance]').forEach((button) => button.addEventListener('click', () => {
-    const appliance = appliances.find((a) => a.id === button.dataset.editAppliance);
+  document.querySelectorAll('[data-edit-appliance]').forEach(function(button) { button.addEventListener('click', function() {
+    const appliance = appliances.find(function(a) { return a.id === button.dataset.editAppliance; });
     editingApplianceId = appliance.id;
-    Object.entries(appliance).forEach(([name, value]) => {
+    Object.entries(appliance).forEach(function(entry) {
+      const name = entry[0], value = entry[1];
       if (applianceForm.elements[name]) applianceForm.elements[name].value = value;
     });
     applianceFormContainer.style.display = 'block';
-  }));
+  });});
 }
 
 function renderMemberSelect() {
-  const memberOptions = members.map((m) => `<option value="${m.name}">${m.name}</option>`).join('');
+  const memberOptions = members.map(function(m) { return '<option value="' + m.name + '">' + m.name + '</option>'; }).join('');
   memberSelect.innerHTML = '<option value="">使用成员（可选）</option>' + memberOptions;
   batchMemberSelect.innerHTML = '<option value="">选择分配成员</option>' + memberOptions;
 }
 
 function renderMembers() {
-  document.querySelector('#memberRows').innerHTML = members.map((m) => `
-    <tr>
-      <td>${m.name}</td>
-      <td>${m.note || ''}</td>
-      <td>
-        <button data-edit-member="${m.id}">编辑</button>
-        <button data-del-member="${m.id}">删除</button>
-      </td>
-    </tr>
-  `).join('');
+  document.querySelector('#memberRows').innerHTML = members.map(function(m) {
+    return '<tr>' +
+      '<td>' + m.name + '</td>' +
+      '<td>' + (m.note || '') + '</td>' +
+      '<td>' +
+        '<button data-edit-member="' + m.id + '">编辑</button>' +
+        '<button data-del-member="' + m.id + '">删除</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
 
   document.querySelectorAll('[data-del-member]').forEach((button) => button.addEventListener('click', () => {
     const memberToDelete = members.find((m) => m.id === button.dataset.delMember);
@@ -1154,63 +1726,63 @@ function renderMemberStats() {
 
   const colors = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#be185d'];
 
-  container.innerHTML = stats.map((stat, index) => {
+  container.innerHTML = stats.map(function(stat, index) {
     const color = colors[index % colors.length];
     const topAppliancesHtml = stat.topAppliances.length > 0
-      ? stat.topAppliances.map(app =>
-          `<span class="topAppliance">${app.name} (${app.count}次)</span>`
-        ).join('')
+      ? stat.topAppliances.map(function(app) {
+          return '<span class="topAppliance">' + app.name + ' (' + app.count + '次)</span>';
+        }).join('')
       : '<span class="empty">暂无</span>';
 
-    return `
-      <div class="memberStatCard">
-        <div class="memberStatHeader" style="border-left-color: ${color};">
-          <div class="memberAvatar" style="background: ${color};">
-            ${stat.name.charAt(0)}
-          </div>
-          <div class="memberInfo">
-            <h3>${stat.name}</h3>
-            <span class="memberRecordCount">${stat.recordCount} 条记录</span>
-          </div>
-        </div>
-        <div class="memberStatBody">
-          <div class="memberStatItem">
-            <span class="statLabel">估算耗电</span>
-            <span class="statValue">${stat.totalKwh.toFixed(2)} kWh</span>
-          </div>
-          <div class="memberStatItem">
-            <span class="statLabel">电费占比</span>
-            <span class="statValue">${stat.costPercent.toFixed(1)}%</span>
-          </div>
-          <div class="memberStatItem">
-            <span class="statLabel">估算费用</span>
-            <span class="statValue">¥${stat.totalCost.toFixed(2)}</span>
-          </div>
-          <div class="memberStatItem fullWidth">
-            <span class="statLabel">高频使用电器</span>
-            <div class="topAppliances">
-              ${topAppliancesHtml}
-            </div>
-          </div>
-        </div>
-        <div class="memberStatProgress">
-          <div class="progressBarBg">
-            <div class="progressBarFill" style="width: ${Math.min(stat.costPercent, 100)}%; background: ${color};"></div>
-          </div>
-        </div>
-      </div>
-    `;
+    return '<div class="memberStatCard">' +
+        '<div class="memberStatHeader" style="border-left-color: ' + color + ';">' +
+          '<div class="memberAvatar" style="background: ' + color + ';">' +
+            stat.name.charAt(0) +
+          '</div>' +
+          '<div class="memberInfo">' +
+            '<h3>' + stat.name + '</h3>' +
+            '<span class="memberRecordCount">' + stat.recordCount + ' 条记录</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="memberStatBody">' +
+          '<div class="memberStatItem">' +
+            '<span class="statLabel">估算耗电</span>' +
+            '<span class="statValue">' + stat.totalKwh.toFixed(2) + ' kWh</span>' +
+          '</div>' +
+          '<div class="memberStatItem">' +
+            '<span class="statLabel">电费占比</span>' +
+            '<span class="statValue">' + stat.costPercent.toFixed(1) + '%</span>' +
+          '</div>' +
+          '<div class="memberStatItem">' +
+            '<span class="statLabel">估算费用</span>' +
+            '<span class="statValue">¥' + stat.totalCost.toFixed(2) + '</span>' +
+          '</div>' +
+          '<div class="memberStatItem fullWidth">' +
+            '<span class="statLabel">高频使用电器</span>' +
+            '<div class="topAppliances">' +
+              topAppliancesHtml +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="memberStatProgress">' +
+          '<div class="progressBarBg">' +
+            '<div class="progressBarFill" style="width: ' + Math.min(stat.costPercent, 100) + '%; background: ' + color + ';"></div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
   }).join('');
 }
 
 function render() {
-  const filtered = records.filter((record) => [record.appliance, record.note, record.slot, getMemberName(record)].join(' ').includes(search.value.trim()));
-  const total = records.reduce((sum, record) => sum + kwh(record), 0);
+  const filtered = records.filter(function(record) { return [record.appliance, record.note, record.slot, getMemberName(record)].join(' ').includes(search.value.trim()); });
+  const total = records.reduce(function(sum, record) { return sum + kwh(record); }, 0);
   document.querySelector('#summary').innerHTML = [
-    ['总估算耗电', `${total.toFixed(2)}kWh`],
+    ['总估算耗电', total.toFixed(2) + 'kWh'],
     ['记录数', records.length],
-    ['最高单次', `${Math.max(...records.map(kwh), 0).toFixed(2)}kWh`]
-  ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join('');
+    ['最高单次', Math.max.apply(Math, records.map(kwh).concat([0])).toFixed(2) + 'kWh']
+  ].map(function(item) { 
+    return '<article><span>' + item[0] + '</span><strong>' + item[1] + '</strong></article>'; 
+  }).join('');
   drawBars('#dailyChart', groupSum(filtered, 'date'), 'kWh');
   drawDonut('#applianceChart', groupSum(filtered, 'appliance'));
   drawBars('#slotChart', groupSum(filtered, 'slot'), 'kWh');
@@ -1221,29 +1793,40 @@ function render() {
   renderMembers();
   renderMemberStats();
   renderEnergyGoal();
+  renderTariffList();
+  renderTariffSelects();
+  renderTariffComparison();
+  renderTariffDetail();
+  if (showMappingConfig) {
+    renderMappingConfig();
+  }
   checkAndNotifyGoal();
 
-  selectedCountSpan.textContent = `已选 ${selectedRecordIds.length} 条`;
-  const allSelected = filtered.length > 0 && filtered.every(r => selectedRecordIds.includes(r.id));
+  selectedCountSpan.textContent = '已选 ' + selectedRecordIds.length + ' 条';
+  const allSelected = filtered.length > 0 && filtered.every(function(r) { return selectedRecordIds.includes(r.id); });
   selectAllCheckbox.checked = allSelected;
 
-  document.querySelector('#rows').innerHTML = filtered.sort((a, b) => b.date.localeCompare(a.date)).map((record) => {
+  document.querySelector('#rows').innerHTML = filtered.sort(function(a, b) { return b.date.localeCompare(a.date); }).map(function(record) {
     const isChecked = selectedRecordIds.includes(record.id);
     const memberName = getMemberName(record);
     const memberLabel = memberName === UNASSIGNED_LABEL
-      ? `<span class="unassignedMember">${UNASSIGNED_LABEL}</span>`
+      ? '<span class="unassignedMember">' + UNASSIGNED_LABEL + '</span>'
       : memberName;
 
-    return `<tr>
-      ${batchAssignMode ? `<td><input type="checkbox" class="recordCheckbox" data-id="${record.id}" ${isChecked ? 'checked' : ''} /></td>` : ''}
-      <td>${record.date}</td>
-      <td>${record.appliance}</td>
-      <td>${memberLabel}</td>
-      <td>${record.slot}</td>
-      <td>${kwh(record).toFixed(2)}kWh</td>
-      <td>${record.note || ''}</td>
-      <td><button data-edit="${record.id}">编辑</button><button data-del="${record.id}">删除</button></td>
-    </tr>`;
+    let rowHtml = '<tr>';
+    if (batchAssignMode) {
+      rowHtml += '<td><input type="checkbox" class="recordCheckbox" data-id="' + record.id + '" ' + (isChecked ? 'checked' : '') + ' /></td>';
+    }
+    rowHtml += 
+      '<td>' + record.date + '</td>' +
+      '<td>' + record.appliance + '</td>' +
+      '<td>' + memberLabel + '</td>' +
+      '<td>' + record.slot + '</td>' +
+      '<td>' + kwh(record).toFixed(2) + 'kWh</td>' +
+      '<td>' + (record.note || '') + '</td>' +
+      '<td><button data-edit="' + record.id + '">编辑</button><button data-del="' + record.id + '">删除</button></td>' +
+    '</tr>';
+    return rowHtml;
   }).join('');
 
   document.querySelectorAll('.recordCheckbox').forEach((checkbox) => {
@@ -1290,24 +1873,32 @@ function groupSum(data, field) {
 function drawBars(selector, data, unit) {
   const el = document.querySelector(selector);
   if (!data.length) return (el.innerHTML = '<p class="empty">暂无数据</p>');
-  const max = Math.max(...data.map((item) => item.value), 1);
-  el.innerHTML = `<svg viewBox="0 0 500 240">${data.slice(0, 6).map((item, index) => `<text x="22" y="${43 + index * 36}">${item.label}</text><rect x="150" y="${23 + index * 36}" width="${(item.value / max) * 300}" height="20" rx="4"/><text x="${160 + (item.value / max) * 300}" y="${39 + index * 36}">${item.value.toFixed(2)}${unit}</text>`).join('')}</svg>`;
+  const max = Math.max.apply(Math, data.map(function(item) { return item.value; }).concat([1]));
+  const bars = data.slice(0, 6).map(function(item, index) {
+    return '<text x="22" y="' + (43 + index * 36) + '">' + item.label + '</text>' +
+           '<rect x="150" y="' + (23 + index * 36) + '" width="' + ((item.value / max) * 300) + '" height="20" rx="4"/>' +
+           '<text x="' + (160 + (item.value / max) * 300) + '" y="' + (39 + index * 36) + '">' + item.value.toFixed(2) + unit + '</text>';
+  }).join('');
+  el.innerHTML = '<svg viewBox="0 0 500 240">' + bars + '</svg>';
 }
 
 function drawDonut(selector, data) {
   const el = document.querySelector(selector);
   if (!data.length) return (el.innerHTML = '<p class="empty">暂无数据</p>');
-  const total = data.reduce((sum, item) => sum + item.value, 0);
+  const total = data.reduce(function(sum, item) { return sum + item.value; }, 0);
   let offset = 25;
   const colors = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed'];
-  const rings = data.slice(0, 5).map((item, index) => {
+  const rings = data.slice(0, 5).map(function(item, index) {
     const len = (item.value / total) * 100;
-    const node = `<circle cx="135" cy="105" r="68" fill="none" stroke="${colors[index]}" stroke-width="28" stroke-dasharray="${len} ${100 - len}" stroke-dashoffset="${offset}" pathLength="100"/>`;
+    const node = '<circle cx="135" cy="105" r="68" fill="none" stroke="' + colors[index] + '" stroke-width="28" stroke-dasharray="' + len + ' ' + (100 - len) + '" stroke-dashoffset="' + offset + '" pathLength="100"/>';
     offset -= len;
     return node;
   }).join('');
-  const legend = data.slice(0, 5).map((item, index) => `<rect x="260" y="${52 + index * 30}" width="14" height="14" fill="${colors[index]}"/><text x="285" y="${64 + index * 30}">${item.label} ${Math.round(item.value / total * 100)}%</text>`).join('');
-  el.innerHTML = `<svg viewBox="0 0 500 220">${rings}<circle cx="135" cy="105" r="44" fill="white"/><text x="135" y="112">${total.toFixed(1)}kWh</text>${legend}</svg>`;
+  const legend = data.slice(0, 5).map(function(item, index) {
+    return '<rect x="260" y="' + (52 + index * 30) + '" width="14" height="14" fill="' + colors[index] + '"/>' +
+           '<text x="285" y="' + (64 + index * 30) + '">' + item.label + ' ' + Math.round(item.value / total * 100) + '%</text>';
+  }).join('');
+  el.innerHTML = '<svg viewBox="0 0 500 220">' + rings + '<circle cx="135" cy="105" r="44" fill="white"/><text x="135" y="112">' + total.toFixed(1) + 'kWh</text>' + legend + '</svg>';
 }
 
 render();
