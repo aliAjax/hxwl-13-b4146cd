@@ -1,0 +1,98 @@
+:root {
+  color: #172033;
+  background: #eef2f8;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }
+
+.shell { max-width: 1180px; margin: auto; padding: 28px; }
+.hero {
+  min-height: 205px;
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 18px;
+  padding: 30px;
+  border-radius: 8px;
+  color: white;
+  background: linear-gradient(rgba(18, 25, 43, .22), rgba(18, 25, 43, .76)), url("https://images.unsplash.com/photo-1558002038-1055907df827?auto=format&fit=crop&w=1600&q=80") center/cover;
+}
+h1 { margin: 0; font-size: clamp(34px, 5vw, 60px); letter-spacing: 0; }
+h2, p { margin-top: 0; }
+.hero p { margin-bottom: 8px; letter-spacing: .08em; text-transform: uppercase; font-size: 12px; }
+
+.hero button, .primary, td button {
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+.hero button { background: white; color: #172033; }
+.primary { background: #2563eb; color: white; font-weight: 700; }
+
+.layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 18px;
+  margin-top: 18px;
+}
+.panel, .summary article {
+  border: 1px solid #d5deee;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 12px 30px rgba(32, 47, 78, .08);
+}
+.panel { padding: 18px; }
+form { display: grid; gap: 12px; align-self: start; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+input, textarea, select {
+  width: 100%;
+  border: 1px solid #c8d3e6;
+  border-radius: 6px;
+  padding: 11px 12px;
+  background: #fbfdff;
+  color: #172033;
+}
+textarea { min-height: 86px; resize: vertical; }
+label { display: block; margin-bottom: 6px; color: #5c6982; font-size: 13px; }
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.summary article { padding: 16px; }
+.summary span { color: #5c6982; font-size: 13px; }
+.summary strong { display: block; margin-top: 6px; font-size: 27px; }
+
+.cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin: 18px 0;
+}
+.panelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.chart { min-height: 260px; }
+.chart.small { min-height: 220px; }
+svg { width: 100%; min-height: 220px; }
+svg text { fill: #5c6982; font-size: 13px; text-anchor: middle; }
+svg rect { fill: #2563eb; }
+.tableWrap { overflow: auto; }
+table { width: 100%; min-width: 760px; border-collapse: collapse; }
+th, td { padding: 12px 10px; border-bottom: 1px solid #e5ebf5; text-align: left; }
+td button { margin-left: 6px; background: #e4ecff; }
+.empty { color: #5c6982; }
+
+@media (max-width: 900px) {
+  .hero, .layout, .cards, .summary, .pair { display: block; }
+  .panel, .summary article { margin-top: 14px; }
+}
