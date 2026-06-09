@@ -3,6 +3,7 @@ import './styles.css';
 const key = 'hxwl-13-home-energy';
 const priceKey = 'hxwl-13-home-energy-price';
 const applianceKey = 'hxwl-13-home-energy-appliances';
+const goalKey = 'hxwl-13-home-energy-goal';
 const seed = [
   { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-04', slot: '晚间', hours: 5.5, watts: 900, note: '睡前开启' },
   { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-04', slot: '傍晚', hours: 1.2, watts: 1800, note: '洗澡前加热' },
@@ -24,6 +25,8 @@ let appliances = JSON.parse(localStorage.getItem(applianceKey) || 'null') || app
 let editingId = null;
 let editingApplianceId = null;
 let priceSettings = JSON.parse(localStorage.getItem(priceKey) || 'null') || { price: 0.56, month: new Date().toISOString().slice(0, 7) };
+let goalSettings = JSON.parse(localStorage.getItem(goalKey) || 'null') || null;
+let lastNotifiedOverTarget = false;
 
 document.querySelector('#app').innerHTML = `
   <main class="shell">
@@ -34,6 +37,58 @@ document.querySelector('#app').innerHTML = `
       </div>
       <button id="sample">载入示例</button>
     </header>
+
+    <section class="panel energyGoalPanel" id="energyGoalSection">
+      <div class="panelHead">
+        <h2>🎯 本月节能目标</h2>
+        <div class="goalActions">
+          <button id="setGoalBtn" class="primary">设置目标</button>
+        </div>
+      </div>
+      <div id="goalProgressContainer">
+        <div class="goalSummary">
+          <div class="goalStat">
+            <span>当前累计耗电</span>
+            <strong id="goalCurrent">0 kWh</strong>
+          </div>
+          <div class="goalStat">
+            <span>目标额度</span>
+            <strong id="goalTarget">-- kWh</strong>
+          </div>
+          <div class="goalStat">
+            <span>剩余额度</span>
+            <strong id="goalRemaining">-- kWh</strong>
+          </div>
+        </div>
+        <div class="progressBarWrap">
+          <div class="progressBar">
+            <div class="progressFill" id="goalProgressFill"></div>
+          </div>
+          <div class="progressLabels">
+            <span id="goalPercent">0%</span>
+            <span id="goalHint">请先设置本月节能目标</span>
+          </div>
+        </div>
+      </div>
+      <div id="goalFormContainer" style="display:none; margin-top:16px;">
+        <form id="goalForm" class="goalForm">
+          <div class="goalFormRow">
+            <label>
+              <span>目标月份</span>
+              <input name="month" type="month" required />
+            </label>
+            <label>
+              <span>目标耗电量 (kWh)</span>
+              <input name="target" type="number" min="0" step="0.1" placeholder="请输入目标耗电量" required />
+            </label>
+          </div>
+          <div class="goalFormRow">
+            <button type="submit" class="primary">保存目标</button>
+            <button type="button" id="cancelGoalBtn" style="background:#e4ecff; border:0; border-radius:6px; padding:11px 24px;">取消</button>
+          </div>
+        </form>
+      </div>
+    </section>
 
     <section class="panel" id="csvImportSection">
       <div class="panelHead">
@@ -157,6 +212,11 @@ const applianceSelect = document.querySelector('#applianceSelect');
 const applianceFormContainer = document.querySelector('#applianceFormContainer');
 const addApplianceBtn = document.querySelector('#addApplianceBtn');
 const cancelApplianceBtn = document.querySelector('#cancelApplianceBtn');
+const setGoalBtn = document.querySelector('#setGoalBtn');
+const cancelGoalBtn = document.querySelector('#cancelGoalBtn');
+const goalForm = document.querySelector('#goalForm');
+const goalFormContainer = document.querySelector('#goalFormContainer');
+const toastContainer = document.querySelector('#toastContainer');
 
 priceForm.elements.price.value = priceSettings.price;
 priceForm.elements.month.value = priceSettings.month;
@@ -166,7 +226,15 @@ form.addEventListener('submit', (event) => {
   const data = Object.fromEntries(new FormData(form).entries());
   const item = { ...data, hours: Number(data.hours), watts: Number(data.watts), id: editingId || crypto.randomUUID() };
   delete item.applianceSelect;
+
+  const beforeTotal = getCurrentMonthTotal();
   records = editingId ? records.map((record) => (record.id === editingId ? item : record)) : [item, ...records];
+  const afterTotal = getCurrentMonthTotal();
+
+  if (beforeTotal > goalSettings?.target && afterTotal <= goalSettings?.target) {
+    lastNotifiedOverTarget = false;
+  }
+
   editingId = null;
   form.reset();
   save();
@@ -210,8 +278,15 @@ applianceForm.addEventListener('submit', (event) => {
 
 search.addEventListener('input', render);
 document.querySelector('#sample').addEventListener('click', () => {
+  const beforeTotal = getCurrentMonthTotal();
   records = seed;
   appliances = applianceSeed;
+  const afterTotal = getCurrentMonthTotal();
+
+  if (beforeTotal > goalSettings?.target && afterTotal <= goalSettings?.target) {
+    lastNotifiedOverTarget = false;
+  }
+
   save();
   render();
 });
@@ -220,6 +295,34 @@ priceForm.addEventListener('submit', (event) => {
   const data = Object.fromEntries(new FormData(priceForm).entries());
   priceSettings = { price: Number(data.price), month: data.month };
   localStorage.setItem(priceKey, JSON.stringify(priceSettings));
+  render();
+});
+
+setGoalBtn.addEventListener('click', () => {
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  goalForm.reset();
+  if (goalSettings) {
+    goalForm.elements.month.value = goalSettings.month;
+    goalForm.elements.target.value = goalSettings.target;
+  } else {
+    goalForm.elements.month.value = currentMonth;
+  }
+  goalFormContainer.style.display = 'block';
+});
+
+cancelGoalBtn.addEventListener('click', () => {
+  goalFormContainer.style.display = 'none';
+  goalForm.reset();
+});
+
+goalForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(goalForm).entries());
+  goalSettings = { month: data.month, target: Number(data.target) };
+  localStorage.setItem(goalKey, JSON.stringify(goalSettings));
+  lastNotifiedOverTarget = false;
+  goalFormContainer.style.display = 'none';
+  showToast('success', '目标已设置', `本月节能目标：${goalSettings.target} kWh`);
   render();
 });
 
@@ -526,7 +629,14 @@ confirmCsvBtn.addEventListener('click', () => {
     note: r.data.note || ''
   }));
 
+  const beforeTotal = getCurrentMonthTotal();
   records = [...newRecords, ...records];
+  const afterTotal = getCurrentMonthTotal();
+
+  if (beforeTotal > goalSettings?.target && afterTotal <= goalSettings?.target) {
+    lastNotifiedOverTarget = false;
+  }
+
   save();
   render();
 
@@ -555,6 +665,142 @@ downloadTemplateBtn.addEventListener('click', () => {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 });
+
+function showToast(type, title, message, duration = 4000) {
+  const icons = {
+    success: '✅',
+    warning: '⚠️',
+    error: '🚨',
+    info: 'ℹ️'
+  };
+
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `
+    <span class="toastIcon">${icons[type] || icons.info}</span>
+    <div class="toastContent">
+      <p class="toastTitle">${title}</p>
+      <p class="toastMessage">${message}</p>
+    </div>
+    <button class="toastClose" aria-label="关闭">×</button>
+  `;
+
+  toastContainer.appendChild(toast);
+
+  const closeBtn = toast.querySelector('.toastClose');
+  closeBtn.addEventListener('click', () => hideToast(toast));
+
+  if (duration > 0) {
+    setTimeout(() => hideToast(toast), duration);
+  }
+
+  return toast;
+}
+
+function hideToast(toast) {
+  if (!toast || toast.classList.contains('hiding')) return;
+  toast.classList.add('hiding');
+  setTimeout(() => {
+    if (toast.parentNode) {
+      toast.parentNode.removeChild(toast);
+    }
+  }, 300);
+}
+
+function getCurrentMonthTotal() {
+  const currentMonth = goalSettings ? goalSettings.month : new Date().toISOString().slice(0, 7);
+  const monthlyRecords = records.filter((record) => record.date.startsWith(currentMonth));
+  return monthlyRecords.reduce((sum, record) => sum + kwh(record), 0);
+}
+
+function checkAndNotifyGoal() {
+  if (!goalSettings) return;
+
+  const currentTotal = getCurrentMonthTotal();
+  const target = goalSettings.target;
+  const isOverTarget = currentTotal > target;
+  const isNearTarget = currentTotal >= target * 0.9 && currentTotal <= target;
+
+  if (isOverTarget && !lastNotifiedOverTarget) {
+    const overAmount = (currentTotal - target).toFixed(2);
+    showToast(
+      'error',
+      '⚠️ 节能目标已超标！',
+      `本月已耗电 ${currentTotal.toFixed(2)} kWh，超出目标 ${overAmount} kWh。请节约用电！`,
+      6000
+    );
+    lastNotifiedOverTarget = true;
+  } else if (isNearTarget && !lastNotifiedOverTarget) {
+    const remaining = (target - currentTotal).toFixed(2);
+    showToast(
+      'warning',
+      '⚡ 接近节能目标',
+      `本月已耗电 ${currentTotal.toFixed(2)} kWh，剩余额度 ${remaining} kWh。请注意控制用电！`,
+      5000
+    );
+  }
+}
+
+function renderEnergyGoal() {
+  const currentTotal = getCurrentMonthTotal();
+  const goalCurrentEl = document.querySelector('#goalCurrent');
+  const goalTargetEl = document.querySelector('#goalTarget');
+  const goalRemainingEl = document.querySelector('#goalRemaining');
+  const goalProgressFill = document.querySelector('#goalProgressFill');
+  const goalPercentEl = document.querySelector('#goalPercent');
+  const goalHintEl = document.querySelector('#goalHint');
+  const progressLabels = document.querySelector('.progressLabels');
+  const goalStats = document.querySelectorAll('.goalStat');
+
+  goalCurrentEl.textContent = `${currentTotal.toFixed(2)} kWh`;
+
+  if (!goalSettings) {
+    goalTargetEl.textContent = '-- kWh';
+    goalRemainingEl.textContent = '-- kWh';
+    goalProgressFill.style.width = '0%';
+    goalProgressFill.className = 'progressFill';
+    goalPercentEl.textContent = '0%';
+    goalHintEl.textContent = '请先设置本月节能目标';
+    progressLabels.className = 'progressLabels';
+    goalStats.forEach(stat => stat.className = 'goalStat');
+    return;
+  }
+
+  const target = goalSettings.target;
+  const remaining = target - currentTotal;
+  const percent = Math.min((currentTotal / target) * 100, 100);
+  const isOverTarget = currentTotal > target;
+  const isNearTarget = currentTotal >= target * 0.9 && !isOverTarget;
+
+  goalTargetEl.textContent = `${target.toFixed(2)} kWh`;
+  goalRemainingEl.textContent = `${remaining.toFixed(2)} kWh`;
+  goalPercentEl.textContent = `${percent.toFixed(1)}%`;
+
+  goalProgressFill.style.width = `${Math.min(percent, 100)}%`;
+  goalProgressFill.className = 'progressFill';
+  progressLabels.className = 'progressLabels';
+
+  goalStats.forEach((stat, index) => {
+    stat.className = 'goalStat';
+    if (index === 2 && remaining < 0) {
+      stat.classList.add('overTarget');
+    } else if (index === 2 && remaining < target * 0.1 && remaining >= 0) {
+      stat.classList.add('warning');
+    }
+  });
+
+  if (isOverTarget) {
+    goalProgressFill.classList.add('overTarget');
+    progressLabels.classList.add('overTarget');
+    goalHintEl.textContent = `已超出目标 ${Math.abs(remaining).toFixed(2)} kWh，请注意节约用电！`;
+  } else if (isNearTarget) {
+    goalProgressFill.classList.add('warning');
+    progressLabels.classList.add('warning');
+    goalHintEl.textContent = `即将达到目标，剩余 ${remaining.toFixed(2)} kWh`;
+  } else {
+    goalHintEl.textContent = `目标月份：${goalSettings.month}`;
+  }
+}
 
 function save() {
   localStorage.setItem(key, JSON.stringify(records));
@@ -638,9 +884,16 @@ function render() {
   renderMonthly();
   renderApplianceSelect();
   renderAppliances();
+  renderEnergyGoal();
+  checkAndNotifyGoal();
   document.querySelector('#rows').innerHTML = filtered.sort((a, b) => b.date.localeCompare(a.date)).map((record) => `<tr><td>${record.date}</td><td>${record.appliance}</td><td>${record.slot}</td><td>${kwh(record).toFixed(2)}kWh</td><td>${record.note || ''}</td><td><button data-edit="${record.id}">编辑</button><button data-del="${record.id}">删除</button></td></tr>`).join('');
   document.querySelectorAll('[data-del]').forEach((button) => button.addEventListener('click', () => {
+    const beforeTotal = getCurrentMonthTotal();
     records = records.filter((record) => record.id !== button.dataset.del);
+    const afterTotal = getCurrentMonthTotal();
+    if (beforeTotal > goalSettings?.target && afterTotal <= goalSettings?.target) {
+      lastNotifiedOverTarget = false;
+    }
     save();
     render();
   }));

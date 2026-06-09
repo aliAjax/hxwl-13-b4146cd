@@ -160,9 +160,218 @@ td button { margin-left: 6px; background: #e4ecff; }
   display: block;
   margin-top: 2px;
 }
+.energyGoalPanel { margin-top: 18px; }
+.goalSummary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+.goalStat {
+  padding: 16px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f0f7ff 0%, #e6f0ff 100%);
+  border: 1px solid #d5deee;
+  text-align: center;
+}
+.goalStat span {
+  display: block;
+  color: #5c6982;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.goalStat strong {
+  font-size: 27px;
+  color: #172033;
+}
+.goalStat.overTarget {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border-color: #fecaca;
+}
+.goalStat.overTarget strong {
+  color: #dc2626;
+}
+.goalStat.warning {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border-color: #fde68a;
+}
+.goalStat.warning strong {
+  color: #d97706;
+}
+.progressBarWrap {
+  margin-top: 20px;
+}
+.progressBar {
+  height: 24px;
+  background: #e5ebf5;
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+}
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, #16a34a 0%, #22c55e 100%);
+  border-radius: 12px;
+  width: 0%;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+.progressFill.warning {
+  background: linear-gradient(90deg, #d97706 0%, #f59e0b 100%);
+}
+.progressFill.overTarget {
+  background: linear-gradient(90deg, #dc2626 0%, #ef4444 100%);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+.progressLabels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+}
+.progressLabels span:first-child {
+  font-size: 18px;
+  font-weight: 700;
+  color: #172033;
+}
+.progressLabels span:last-child {
+  font-size: 13px;
+  color: #5c6982;
+}
+.progressLabels.overTarget span:first-child {
+  color: #dc2626;
+}
+.progressLabels.warning span:first-child {
+  color: #d97706;
+}
+.goalForm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.goalFormRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.goalFormRow:last-child {
+  justify-content: flex-end;
+  grid-template-columns: auto auto;
+}
+.goalForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.goalForm label span {
+  font-size: 13px;
+  color: #5c6982;
+  font-weight: 500;
+}
+.goalActions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.toastContainer {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.toast {
+  padding: 16px 20px;
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 300px;
+  max-width: 420px;
+  animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: white;
+  border-left: 4px solid #2563eb;
+}
+.toast.warning {
+  border-left-color: #d97706;
+  background: #fffbeb;
+}
+.toast.error {
+  border-left-color: #dc2626;
+  background: #fef2f2;
+}
+.toast.success {
+  border-left-color: #16a34a;
+  background: #f0fdf4;
+}
+.toastIcon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+.toastContent {
+  flex: 1;
+}
+.toastTitle {
+  font-weight: 600;
+  font-size: 15px;
+  margin: 0 0 4px 0;
+  color: #172033;
+}
+.toastMessage {
+  font-size: 13px;
+  margin: 0;
+  color: #5c6982;
+}
+.toastClose {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #9ca3af;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.toastClose:hover {
+  color: #6b7280;
+}
+@keyframes slideIn {
+  from {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+}
+.toast.hiding {
+  animation: slideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
 @media (max-width: 900px) {
   .hero, .layout, .cards, .summary, .pair { display: block; }
   .panel, .summary article { margin-top: 14px; }
   #applianceForm { grid-template-columns: 1fr !important; }
   .csvActions { flex-wrap: wrap; }
+  .goalSummary { grid-template-columns: 1fr; }
+  .goalFormRow { grid-template-columns: 1fr; }
+  .toastContainer { left: 20px; right: 20px; }
+  .toast { min-width: auto; }
 }
