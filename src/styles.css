@@ -94,4 +94,5 @@ td button { margin-left: 6px; background: #e4ecff; }
 @media (max-width: 900px) {
   .hero, .layout, .cards, .summary, .pair { display: block; }
   .panel, .summary article { margin-top: 14px; }
+  #applianceForm { grid-template-columns: 1fr !important; }
 }
