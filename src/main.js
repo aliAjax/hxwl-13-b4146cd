@@ -1,6 +1,7 @@
 import './styles.css';
 
 const key = 'hxwl-13-home-energy';
+const priceKey = 'hxwl-13-home-energy-price';
 const seed = [
   { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-04', slot: '晚间', hours: 5.5, watts: 900, note: '睡前开启' },
   { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-04', slot: '傍晚', hours: 1.2, watts: 1800, note: '洗澡前加热' },
@@ -11,6 +12,7 @@ const seed = [
 
 let records = JSON.parse(localStorage.getItem(key) || 'null') || seed;
 let editingId = null;
+let priceSettings = JSON.parse(localStorage.getItem(priceKey) || 'null') || { price: 0.56, month: new Date().toISOString().slice(0, 7) };
 
 document.querySelector('#app').innerHTML = `
   <main class="shell">
@@ -53,6 +55,22 @@ document.querySelector('#app').innerHTML = `
       <div class="panel"><h2>高耗电时段</h2><div class="chart small" id="slotChart"></div></div>
     </section>
 
+    <section class="layout">
+      <form id="priceForm" class="panel">
+        <h2>月度电费估算</h2>
+        <input name="price" type="number" min="0" step="0.01" placeholder="每度电单价(元)" required />
+        <input name="month" type="month" required />
+        <button class="primary">更新估算</button>
+      </form>
+      <div>
+        <section class="summary" id="monthlySummary"></section>
+        <section class="panel">
+          <h2>当月每日耗电</h2>
+          <div class="chart" id="monthlyChart"></div>
+        </section>
+      </div>
+    </section>
+
     <section class="panel">
       <div class="panelHead"><h2>记录列表</h2><input id="search" placeholder="搜索电器或备注" /></div>
       <div class="tableWrap"><table><thead><tr><th>日期</th><th>电器</th><th>时段</th><th>耗电</th><th>备注</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
@@ -62,6 +80,10 @@ document.querySelector('#app').innerHTML = `
 
 const form = document.querySelector('#form');
 const search = document.querySelector('#search');
+const priceForm = document.querySelector('#priceForm');
+
+priceForm.elements.price.value = priceSettings.price;
+priceForm.elements.month.value = priceSettings.month;
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -79,6 +101,13 @@ document.querySelector('#sample').addEventListener('click', () => {
   save();
   render();
 });
+priceForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(priceForm).entries());
+  priceSettings = { price: Number(data.price), month: data.month };
+  localStorage.setItem(priceKey, JSON.stringify(priceSettings));
+  render();
+});
 
 function save() {
   localStorage.setItem(key, JSON.stringify(records));
@@ -86,6 +115,30 @@ function save() {
 
 function kwh(record) {
   return record.hours * record.watts / 1000;
+}
+
+function getDaysInMonth(yearMonth) {
+  const [year, month] = yearMonth.split('-').map(Number);
+  return new Date(year, month, 0).getDate();
+}
+
+function renderMonthly() {
+  const { price, month } = priceSettings;
+  const monthlyRecords = records.filter((record) => record.date.startsWith(month));
+  const monthlyTotal = monthlyRecords.reduce((sum, record) => sum + kwh(record), 0);
+  const estimatedCost = monthlyTotal * price;
+  const daysInMonth = getDaysInMonth(month);
+  const dailyAverage = estimatedCost / daysInMonth;
+  const daysWithData = [...new Set(monthlyRecords.map((r) => r.date))].length;
+
+  document.querySelector('#monthlySummary').innerHTML = [
+    ['当月总耗电', `${monthlyTotal.toFixed(2)}kWh`],
+    ['预计电费', `¥${estimatedCost.toFixed(2)}`],
+    ['日均费用', `¥${dailyAverage.toFixed(2)}`],
+    ['活跃天数', `${daysWithData}/${daysInMonth}天`]
+  ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join('');
+
+  drawBars('#monthlyChart', groupSum(monthlyRecords, 'date').sort((a, b) => a.label.localeCompare(b.label)), 'kWh');
 }
 
 function render() {
@@ -99,6 +152,7 @@ function render() {
   drawBars('#dailyChart', groupSum(filtered, 'date'), 'kWh');
   drawDonut('#applianceChart', groupSum(filtered, 'appliance'));
   drawBars('#slotChart', groupSum(filtered, 'slot'), 'kWh');
+  renderMonthly();
   document.querySelector('#rows').innerHTML = filtered.sort((a, b) => b.date.localeCompare(a.date)).map((record) => `<tr><td>${record.date}</td><td>${record.appliance}</td><td>${record.slot}</td><td>${kwh(record).toFixed(2)}kWh</td><td>${record.note || ''}</td><td><button data-edit="${record.id}">编辑</button><button data-del="${record.id}">删除</button></td></tr>`).join('');
   document.querySelectorAll('[data-del]').forEach((button) => button.addEventListener('click', () => {
     records = records.filter((record) => record.id !== button.dataset.del);
