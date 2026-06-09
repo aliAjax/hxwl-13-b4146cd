@@ -79,7 +79,7 @@ document.querySelector('#app').innerHTML = `
             </label>
             <label>
               <span>目标耗电量 (kWh)</span>
-              <input name="target" type="number" min="0" step="0.1" placeholder="请输入目标耗电量" required />
+              <input name="target" type="number" min="0.1" step="0.1" placeholder="请输入目标耗电量" required />
             </label>
           </div>
           <div class="goalFormRow">
@@ -318,7 +318,12 @@ cancelGoalBtn.addEventListener('click', () => {
 goalForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(goalForm).entries());
-  goalSettings = { month: data.month, target: Number(data.target) };
+  const targetValue = Number(data.target);
+  if (targetValue <= 0) {
+    showToast('error', '目标值无效', '请设置大于0的目标耗电量');
+    return;
+  }
+  goalSettings = { month: data.month, target: targetValue };
   localStorage.setItem(goalKey, JSON.stringify(goalSettings));
   lastNotifiedOverTarget = false;
   goalFormContainer.style.display = 'none';
@@ -718,8 +723,8 @@ function checkAndNotifyGoal() {
 
   const currentTotal = getCurrentMonthTotal();
   const target = goalSettings.target;
-  const isOverTarget = currentTotal > target;
-  const isNearTarget = currentTotal >= target * 0.9 && currentTotal <= target;
+  const isOverTarget = target <= 0 || currentTotal > target;
+  const isNearTarget = target > 0 && currentTotal >= target * 0.9 && currentTotal <= target;
 
   if (isOverTarget && !lastNotifiedOverTarget) {
     const overAmount = (currentTotal - target).toFixed(2);
@@ -768,9 +773,9 @@ function renderEnergyGoal() {
 
   const target = goalSettings.target;
   const remaining = target - currentTotal;
-  const percent = Math.min((currentTotal / target) * 100, 100);
-  const isOverTarget = currentTotal > target;
-  const isNearTarget = currentTotal >= target * 0.9 && !isOverTarget;
+  const percent = target > 0 ? Math.min((currentTotal / target) * 100, 100) : (currentTotal > 0 ? 100 : 0);
+  const isOverTarget = target <= 0 || currentTotal > target;
+  const isNearTarget = target > 0 && currentTotal >= target * 0.9 && !isOverTarget;
 
   goalTargetEl.textContent = `${target.toFixed(2)} kWh`;
   goalRemainingEl.textContent = `${remaining.toFixed(2)} kWh`;
@@ -784,7 +789,7 @@ function renderEnergyGoal() {
     stat.className = 'goalStat';
     if (index === 2 && remaining < 0) {
       stat.classList.add('overTarget');
-    } else if (index === 2 && remaining < target * 0.1 && remaining >= 0) {
+    } else if (index === 2 && target > 0 && remaining < target * 0.1 && remaining >= 0) {
       stat.classList.add('warning');
     }
   });
