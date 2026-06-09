@@ -301,12 +301,18 @@ function validateRow(row, index, headers) {
     errors.push('日期格式错误，应为YYYY-MM-DD或YYYY/MM/DD');
     fieldStatus.date = 'invalid';
   } else {
-    data.date = data.date.replace(/\//g, '-');
-    const d = new Date(data.date);
-    if (isNaN(d.getTime())) {
-      errors.push('日期无效');
+    const normalizedDate = data.date.replace(/\//g, '-');
+    const parts = normalizedDate.split('-').map(Number);
+    const [year, month, day] = parts;
+    const d = new Date(year, month - 1, day);
+    if (isNaN(d.getTime()) ||
+        d.getFullYear() !== year ||
+        d.getMonth() !== month - 1 ||
+        d.getDate() !== day) {
+      errors.push('日期无效，不存在该日期');
       fieldStatus.date = 'invalid';
     } else {
+      data.date = normalizedDate;
       fieldStatus.date = 'valid';
     }
   }
