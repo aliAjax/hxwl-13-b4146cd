@@ -2043,3 +2043,115 @@ td button { margin-left: 6px; background: #e4ecff; }
     display: none;
   }
 }
+
+.scheduleActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.scheduleHint {
+  color: #5c6982;
+  font-size: 13px;
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+.scheduleTaskForm {
+  display: grid;
+  gap: 14px;
+  background: #f8fafd;
+  border: 1px solid #e5ebf5;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.scheduleTaskForm h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.scheduleTaskFormRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.scheduleTaskFormRow label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scheduleTaskFormRow label span {
+  font-size: 13px;
+  color: #5c6982;
+}
+
+.scheduleTaskTable,
+.scheduleResultTable {
+  min-width: 680px;
+}
+
+.scheduleTimelineContainer {
+  margin-top: 12px;
+}
+
+.scheduleTimeline {
+  position: relative;
+  padding-top: 28px;
+}
+
+.scheduleTimeAxis {
+  position: relative;
+  height: 20px;
+  border-bottom: 1px solid #d5deee;
+  margin-bottom: 8px;
+}
+
+.timeTick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: #5c6982;
+}
+
+.scheduleBarTrack {
+  position: relative;
+  height: 36px;
+  border-radius: 6px;
+  background: #f1f5fb;
+  overflow: hidden;
+}
+
+.scheduleBar {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  overflow: hidden;
+}
+
+.scheduleBarLabel {
+  font-size: 11px;
+  color: white;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+}
+
+@media (max-width: 900px) {
+  .scheduleTaskFormRow {
+    grid-template-columns: 1fr;
+  }
+
+  .scheduleActions {
+    flex-wrap: wrap;
+  }
+}

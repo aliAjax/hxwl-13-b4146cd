@@ -17,6 +17,8 @@ const memberKey = 'hxwl-13-home-energy-members';
 const tariffKey = 'hxwl-13-home-energy-tariffs';
 const slotMappingKey = 'hxwl-13-home-energy-slot-mapping';
 const anomalyIgnoreKey = 'hxwl-13-home-energy-anomaly-ignore';
+const scheduleTaskKey = 'hxwl-13-home-energy-schedule-tasks';
+const scheduleResultKey = 'hxwl-13-home-energy-schedule-result';
 const seed = [
   { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-01', slot: '晚间', hours: 4, watts: 900, note: '睡前开启', member: '爸爸' },
   { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-01', slot: '傍晚', hours: 1.2, watts: 1800, note: '洗澡前加热', member: '妈妈' },
@@ -88,6 +90,12 @@ const slotMappingSeed = {
   '深夜': 'valley',
   '全天': 'flat'
 };
+
+const scheduleTaskSeed = [
+  { id: crypto.randomUUID(), appliance: '洗衣机', watts: 420, duration: 1, deadline: '18:00', earliestStart: '00:00', tariffId: '' },
+  { id: crypto.randomUUID(), appliance: '电热水器', watts: 1800, duration: 1.5, deadline: '22:00', earliestStart: '00:00', tariffId: '' },
+  { id: crypto.randomUUID(), appliance: '空调预冷', watts: 900, duration: 2, deadline: '19:00', earliestStart: '14:00', tariffId: '' }
+];
 const slotOrder = ['清晨', '上午', '午间', '下午', '午后', '傍晚', '晚间', '深夜', '全天'];
 
 const UNASSIGNED_LABEL = '未分配';
@@ -123,6 +131,9 @@ let showTariffForm = false;
 let showMappingConfig = false;
 let ignoredAnomalies = JSON.parse(localStorage.getItem(anomalyIgnoreKey) || '[]');
 let showIgnoredAnomalies = false;
+let scheduleTasks = JSON.parse(localStorage.getItem(scheduleTaskKey) || 'null') || scheduleTaskSeed;
+let scheduleResult = JSON.parse(localStorage.getItem(scheduleResultKey) || 'null');
+let editingScheduleTaskId = null;
 
 let backupRestoreState = {
   step: 'welcome',
@@ -142,7 +153,8 @@ let backupRestoreOptions = {
   includeGoalSettings: true,
   includeTariffs: true,
   includeSlotMapping: true,
-  includeIgnoredAnomalies: true
+  includeIgnoredAnomalies: true,
+  includeScheduleTasks: true
 };
 
 function getBackupSourceData() {
@@ -154,7 +166,8 @@ function getBackupSourceData() {
     goalSettings,
     tariffs,
     slotMapping,
-    ignoredAnomalies
+    ignoredAnomalies,
+    scheduleTasks
   };
 }
 
@@ -478,6 +491,95 @@ document.querySelector('#app').innerHTML = `
             </tr>
           </thead>
           <tbody id="tariffDetailRows"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <section class="panel" id="scheduleOptimizerSection">
+      <div class="panelHead">
+        <h2>🕐 用电排程优化</h2>
+        <div class="scheduleActions">
+          <button id="addScheduleTaskBtn" class="primary">新增排程任务</button>
+          <button id="generateScheduleBtn" class="primary">生成建议排程</button>
+        </div>
+      </div>
+      <p class="scheduleHint">配置可调整的电器任务，系统将根据分时电价自动生成当天最低费用排程</p>
+      <div id="scheduleTaskFormContainer" style="display:none; margin-top:16px;">
+        <form id="scheduleTaskForm" class="scheduleTaskForm">
+          <h3 id="scheduleTaskFormTitle">新增排程任务</h3>
+          <div class="scheduleTaskFormRow">
+            <label>
+              <span>电器名称</span>
+              <input name="appliance" type="text" placeholder="例如：洗衣机" required />
+            </label>
+            <label>
+              <span>功率 (W)</span>
+              <input name="watts" type="number" min="1" step="1" placeholder="420" required />
+            </label>
+          </div>
+          <div class="scheduleTaskFormRow">
+            <label>
+              <span>预计时长 (h)</span>
+              <input name="duration" type="number" min="0.5" step="0.5" placeholder="1" required />
+            </label>
+            <label>
+              <span>最晚完成时间</span>
+              <input name="deadline" type="time" required />
+            </label>
+          </div>
+          <div class="scheduleTaskFormRow">
+            <label>
+              <span>最早开始时间（可选）</span>
+              <input name="earliestStart" type="time" />
+            </label>
+            <label>
+              <span>适用电价方案</span>
+              <select name="tariffId" id="scheduleTariffSelect"></select>
+            </label>
+          </div>
+          <div class="scheduleTaskFormRow" style="justify-content:flex-end;">
+            <button type="button" id="cancelScheduleTaskBtn" style="background:#e4ecff; border:0; border-radius:6px; padding:11px 24px;">取消</button>
+            <button type="submit" class="primary">保存任务</button>
+          </div>
+        </form>
+      </div>
+      <div id="scheduleTaskListContainer" style="margin-top:16px;">
+        <div class="tableWrap"><table class="scheduleTaskTable">
+          <thead>
+            <tr>
+              <th>电器</th>
+              <th>功率</th>
+              <th>时长</th>
+              <th>最晚完成</th>
+              <th>最早开始</th>
+              <th>电价方案</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="scheduleTaskRows"></tbody>
+        </table></div>
+      </div>
+      <div id="scheduleResultSection" style="display:none; margin-top:24px;">
+        <div class="panelHead" style="margin-bottom:12px;">
+          <h3 style="margin:0;">📋 建议排程方案</h3>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <span id="scheduleSavingsHint" style="font-size:13px; color:#16a34a; font-weight:600;"></span>
+            <button id="applyScheduleBtn" class="primary" style="background:#16a34a;">转为用电记录</button>
+          </div>
+        </div>
+        <div id="scheduleTimelineContainer" class="scheduleTimelineContainer"></div>
+        <div class="tableWrap" style="margin-top:16px;"><table class="scheduleResultTable">
+          <thead>
+            <tr>
+              <th>电器</th>
+              <th>建议开始</th>
+              <th>建议结束</th>
+              <th>时段类型</th>
+              <th>耗电</th>
+              <th>预估费用</th>
+            </tr>
+          </thead>
+          <tbody id="scheduleResultRows"></tbody>
         </table></div>
       </div>
     </section>
@@ -1197,6 +1299,48 @@ resetMappingBtn.addEventListener('click', () => {
 comparisonMonthSelect.addEventListener('change', renderTariffComparison);
 detailTariffSelect.addEventListener('change', renderTariffDetail);
 
+document.querySelector('#addScheduleTaskBtn').addEventListener('click', function() {
+  editingScheduleTaskId = null;
+  document.querySelector('#scheduleTaskForm').reset();
+  document.querySelector('#scheduleTaskFormTitle').textContent = '新增排程任务';
+  document.querySelector('#scheduleTaskFormContainer').style.display = 'block';
+  renderScheduleTariffSelect();
+});
+
+document.querySelector('#cancelScheduleTaskBtn').addEventListener('click', function() {
+  editingScheduleTaskId = null;
+  document.querySelector('#scheduleTaskForm').reset();
+  document.querySelector('#scheduleTaskFormContainer').style.display = 'none';
+});
+
+document.querySelector('#scheduleTaskForm').addEventListener('submit', function(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(this).entries());
+  const item = {
+    id: editingScheduleTaskId || crypto.randomUUID(),
+    appliance: data.appliance,
+    watts: Number(data.watts),
+    duration: Number(data.duration),
+    deadline: data.deadline,
+    earliestStart: data.earliestStart || '00:00',
+    tariffId: data.tariffId || ''
+  };
+  scheduleTasks = editingScheduleTaskId
+    ? scheduleTasks.map(function(t) { return t.id === editingScheduleTaskId ? item : t; })
+    : [item, ...scheduleTasks];
+  editingScheduleTaskId = null;
+  this.reset();
+  document.querySelector('#scheduleTaskFormContainer').style.display = 'none';
+  scheduleResult = null;
+  localStorage.setItem(scheduleResultKey, JSON.stringify(null));
+  localStorage.setItem(scheduleTaskKey, JSON.stringify(scheduleTasks));
+  renderScheduleTaskList();
+  renderScheduleResult();
+});
+
+document.querySelector('#generateScheduleBtn').addEventListener('click', generateSchedule);
+document.querySelector('#applyScheduleBtn').addEventListener('click', applyScheduleToRecords);
+
 toggleIgnoredBtn.addEventListener('click', () => {
   showIgnoredAnomalies = !showIgnoredAnomalies;
   toggleIgnoredBtn.textContent = showIgnoredAnomalies ? '隐藏已忽略' : '显示已忽略';
@@ -1838,6 +1982,366 @@ function renderTariffDetail() {
     }).join('');
 }
 
+function timeToMinutes(timeStr) {
+  if (!timeStr) return 0;
+  const parts = timeStr.split(':');
+  return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+}
+
+function minutesToTime(minutes) {
+  const m = ((minutes % 1440) + 1440) % 1440;
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+}
+
+function getHourTier(halfHourIndex, tariff) {
+  const hourStart = halfHourIndex / 2;
+  const hh = Math.floor(hourStart);
+  const mm = (hourStart % 1) * 60;
+  const timeStr = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+
+  function timeInRange(ranges) {
+    for (const range of ranges) {
+      const parts = range.split('-');
+      if (parts.length !== 2) continue;
+      if (timeStr >= parts[0] && timeStr < parts[1]) return true;
+    }
+    return false;
+  }
+
+  if (timeInRange(tariff.valleyHours)) return 'valley';
+  if (timeInRange(tariff.peakHours)) return 'peak';
+  return 'flat';
+}
+
+function generateSchedule() {
+  if (scheduleTasks.length === 0) {
+    showToast('warning', '无排程任务', '请先添加排程任务');
+    return;
+  }
+
+  const defaultTariff = tariffs.find(t => t.isDefault) || tariffs[0];
+  if (!defaultTariff) {
+    showToast('error', '无电价方案', '请先在分时电价模拟器中添加电价方案');
+    return;
+  }
+
+  const HALF_HOUR_SLOTS = 48;
+  const occupied = new Array(HALF_HOUR_SLOTS).fill(null);
+
+  const sortedTasks = [...scheduleTasks].sort((a, b) => {
+    const aDeadline = timeToMinutes(a.deadline);
+    const bDeadline = timeToMinutes(b.deadline);
+    return aDeadline - bDeadline;
+  });
+
+  const placements = [];
+  let feasible = true;
+
+  for (const task of sortedTasks) {
+    const tariff = task.tariffId ? tariffs.find(t => t.id === task.tariffId) : defaultTariff;
+    const effectiveTariff = tariff || defaultTariff;
+    const durationSlots = Math.ceil(task.duration * 2);
+    const deadlineSlot = Math.ceil(timeToMinutes(task.deadline) / 30);
+    const earliestSlot = Math.floor(timeToMinutes(task.earliestStart || '00:00') / 30);
+
+    let bestStart = -1;
+    let bestCost = Infinity;
+
+    for (let start = earliestSlot; start + durationSlots <= Math.min(deadlineSlot, HALF_HOUR_SLOTS); start++) {
+      let canPlace = true;
+      for (let s = start; s < start + durationSlots; s++) {
+        if (occupied[s] !== null) {
+          canPlace = false;
+          break;
+        }
+      }
+      if (!canPlace) continue;
+
+      let cost = 0;
+      for (let s = start; s < start + durationSlots; s++) {
+        const tier = getHourTier(s, effectiveTariff);
+        const price = getTierPrice(effectiveTariff, tier);
+        cost += (task.watts / 1000) * 0.5 * price;
+      }
+
+      if (cost < bestCost) {
+        bestCost = cost;
+        bestStart = start;
+      }
+    }
+
+    if (bestStart === -1) {
+      feasible = false;
+      placements.push({
+        task,
+        tariff: effectiveTariff,
+        startSlot: -1,
+        endSlot: -1,
+        cost: 0,
+        kwh: (task.watts / 1000) * task.duration,
+        error: '无法在约束范围内排程'
+      });
+    } else {
+      for (let s = bestStart; s < bestStart + durationSlots; s++) {
+        occupied[s] = task.id;
+      }
+      placements.push({
+        task,
+        tariff: effectiveTariff,
+        startSlot: bestStart,
+        endSlot: bestStart + durationSlots,
+        cost: bestCost,
+        kwh: (task.watts / 1000) * task.duration
+      });
+    }
+  }
+
+  let naiveCost = 0;
+  for (const task of sortedTasks) {
+    const tariff = task.tariffId ? tariffs.find(t => t.id === task.tariffId) : defaultTariff;
+    const effectiveTariff = tariff || defaultTariff;
+    const durationSlots = Math.ceil(task.duration * 2);
+    const earliestSlot = Math.floor(timeToMinutes(task.earliestStart || '00:00') / 30);
+    let cost = 0;
+    for (let s = earliestSlot; s < earliestSlot + durationSlots && s < 48; s++) {
+      const tier = getHourTier(s, effectiveTariff);
+      const price = getTierPrice(effectiveTariff, tier);
+      cost += (task.watts / 1000) * 0.5 * price;
+    }
+    naiveCost += cost;
+  }
+
+  const optimizedCost = placements.reduce((sum, p) => sum + p.cost, 0);
+  const savings = naiveCost - optimizedCost;
+
+  scheduleResult = {
+    date: new Date().toISOString().slice(0, 10),
+    placements,
+    totalCost: optimizedCost,
+    totalKwh: placements.reduce((sum, p) => sum + p.kwh, 0),
+    savings: Math.max(0, savings),
+    feasible
+  };
+
+  localStorage.setItem(scheduleResultKey, JSON.stringify(scheduleResult));
+  renderScheduleResult();
+
+  if (!feasible) {
+    showToast('warning', '排程不完全可行', '部分任务无法在约束范围内排程，请检查时间约束');
+  } else if (savings > 0.01) {
+    showToast('success', '排程已生成', `优化后预计节省 ¥${savings.toFixed(2)}`);
+  } else {
+    showToast('success', '排程已生成', '已生成当天建议排程');
+  }
+}
+
+function getSlotNameForTime(timeStr) {
+  const minutes = timeToMinutes(timeStr);
+  const hour = minutes / 60;
+  if (hour < 6) return '深夜';
+  if (hour < 9) return '清晨';
+  if (hour < 11) return '上午';
+  if (hour < 13) return '午间';
+  if (hour < 15) return '下午';
+  if (hour < 17) return '午后';
+  if (hour < 19) return '傍晚';
+  if (hour < 22) return '晚间';
+  return '深夜';
+}
+
+function renderScheduleTaskList() {
+  const tbody = document.querySelector('#scheduleTaskRows');
+  if (scheduleTasks.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">暂无排程任务，请点击「新增排程任务」添加</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = scheduleTasks.map(function(task) {
+    const tariff = task.tariffId ? tariffs.find(t => t.id === task.tariffId) : null;
+    const tariffName = tariff ? tariff.name : '默认方案';
+    return '<tr>' +
+      '<td>' + task.appliance + '</td>' +
+      '<td>' + task.watts + 'W</td>' +
+      '<td>' + task.duration + 'h</td>' +
+      '<td>' + task.deadline + '</td>' +
+      '<td>' + (task.earliestStart || '00:00') + '</td>' +
+      '<td>' + tariffName + '</td>' +
+      '<td>' +
+        '<button data-edit-schedule-task="' + task.id + '">编辑</button>' +
+        '<button data-del-schedule-task="' + task.id + '" style="background:#fee2e2; color:#dc2626;">删除</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+
+  document.querySelectorAll('[data-del-schedule-task]').forEach(function(button) {
+    button.addEventListener('click', function() {
+      scheduleTasks = scheduleTasks.filter(function(t) { return t.id !== button.dataset.delScheduleTask; });
+      scheduleResult = null;
+      localStorage.setItem(scheduleResultKey, JSON.stringify(null));
+      localStorage.setItem(scheduleTaskKey, JSON.stringify(scheduleTasks));
+      renderScheduleTaskList();
+      renderScheduleResult();
+    });
+  });
+
+  document.querySelectorAll('[data-edit-schedule-task]').forEach(function(button) {
+    button.addEventListener('click', function() {
+      const task = scheduleTasks.find(function(t) { return t.id === button.dataset.editScheduleTask; });
+      if (!task) return;
+      editingScheduleTaskId = task.id;
+      document.querySelector('#scheduleTaskFormTitle').textContent = '编辑排程任务';
+      const form = document.querySelector('#scheduleTaskForm');
+      form.elements.appliance.value = task.appliance;
+      form.elements.watts.value = task.watts;
+      form.elements.duration.value = task.duration;
+      form.elements.deadline.value = task.deadline;
+      form.elements.earliestStart.value = task.earliestStart || '';
+      form.elements.tariffId.value = task.tariffId || '';
+      document.querySelector('#scheduleTaskFormContainer').style.display = 'block';
+    });
+  });
+}
+
+function renderScheduleResult() {
+  const section = document.querySelector('#scheduleResultSection');
+  if (!scheduleResult || !scheduleResult.placements || scheduleResult.placements.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+
+  const savingsHint = document.querySelector('#scheduleSavingsHint');
+  if (scheduleResult.savings > 0.01) {
+    savingsHint.textContent = '相比最早开始排程节省 ¥' + scheduleResult.savings.toFixed(2);
+  } else {
+    savingsHint.textContent = '';
+  }
+
+  renderScheduleTimeline();
+  renderScheduleResultTable();
+}
+
+function renderScheduleTimeline() {
+  const container = document.querySelector('#scheduleTimelineContainer');
+  if (!scheduleResult || !scheduleResult.placements) return;
+
+  const HALF_HOUR_SLOTS = 48;
+  const grid = new Array(HALF_HOUR_SLOTS).fill(null);
+  const colors = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#be185d'];
+
+  scheduleResult.placements.forEach(function(placement, idx) {
+    if (placement.startSlot < 0) return;
+    for (let s = placement.startSlot; s < placement.endSlot; s++) {
+      grid[s] = { task: placement.task, color: colors[idx % colors.length], idx };
+    }
+  });
+
+  let html = '<div class="scheduleTimeline">';
+  html += '<div class="scheduleTimeAxis">';
+  for (let h = 0; h < 24; h += 3) {
+    html += '<span class="timeTick" style="left:' + (h / 24 * 100) + '%;">' + String(h).padStart(2, '0') + ':00</span>';
+  }
+  html += '</div>';
+  html += '<div class="scheduleBarTrack">';
+
+  let i = 0;
+  while (i < HALF_HOUR_SLOTS) {
+    if (grid[i]) {
+      const startSlot = i;
+      const color = grid[i].color;
+      const taskName = grid[i].task.appliance;
+      while (i < HALF_HOUR_SLOTS && grid[i] && grid[i].idx === grid[startSlot].idx) i++;
+      const leftPct = (startSlot / HALF_HOUR_SLOTS * 100).toFixed(2);
+      const widthPct = ((i - startSlot) / HALF_HOUR_SLOTS * 100).toFixed(2);
+      html += '<div class="scheduleBar" style="left:' + leftPct + '%; width:' + widthPct + '%; background:' + color + ';">' +
+        '<span class="scheduleBarLabel">' + taskName + '</span>' +
+      '</div>';
+    } else {
+      i++;
+    }
+  }
+
+  html += '</div></div>';
+  container.innerHTML = html;
+}
+
+function renderScheduleResultTable() {
+  const tbody = document.querySelector('#scheduleResultRows');
+  if (!scheduleResult || !scheduleResult.placements) return;
+
+  tbody.innerHTML = scheduleResult.placements.map(function(placement) {
+    if (placement.startSlot < 0) {
+      return '<tr style="background:#fef2f2;">' +
+        '<td>' + placement.task.appliance + '</td>' +
+        '<td colspan="3" style="color:#dc2626;">' + placement.error + '</td>' +
+        '<td>' + placement.kwh.toFixed(2) + 'kWh</td>' +
+        '<td>--</td>' +
+      '</tr>';
+    }
+
+    const startTime = minutesToTime(placement.startSlot * 30);
+    const endTime = minutesToTime(placement.endSlot * 30);
+    const tier = getHourTier(placement.startSlot, placement.tariff);
+    const tierName = getTierName(tier);
+    const tierColor = getTierColor(tier);
+
+    return '<tr>' +
+      '<td>' + placement.task.appliance + '</td>' +
+      '<td>' + startTime + '</td>' +
+      '<td>' + endTime + '</td>' +
+      '<td><span class="tierBadge" style="background: ' + tierColor + '20; color: ' + tierColor + ';">' + tierName + '</span></td>' +
+      '<td>' + placement.kwh.toFixed(2) + 'kWh</td>' +
+      '<td><strong>¥' + placement.cost.toFixed(2) + '</strong></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function renderScheduleTariffSelect() {
+  const select = document.querySelector('#scheduleTariffSelect');
+  const options = tariffs.map(function(t) {
+    return '<option value="' + t.id + '">' + t.name + (t.isDefault ? ' (默认)' : '') + '</option>';
+  }).join('');
+  select.innerHTML = '<option value="">默认方案</option>' + options;
+}
+
+function applyScheduleToRecords() {
+  if (!scheduleResult || !scheduleResult.placements) return;
+
+  const today = new Date().toISOString().slice(0, 10);
+  let addedCount = 0;
+
+  scheduleResult.placements.forEach(function(placement) {
+    if (placement.startSlot < 0) return;
+
+    const startTime = minutesToTime(placement.startSlot * 30);
+    const slotName = getSlotNameForTime(startTime);
+
+    const newRecord = {
+      id: crypto.randomUUID(),
+      appliance: placement.task.appliance,
+      date: today,
+      slot: slotName,
+      hours: placement.task.duration,
+      watts: placement.task.watts,
+      note: '排程优化自动生成',
+      member: ''
+    };
+
+    records.unshift(newRecord);
+    addedCount++;
+  });
+
+  save();
+  render();
+  showToast('success', '已转为用电记录', addedCount + ' 条排程任务已转为用电记录');
+
+  scheduleResult = null;
+  localStorage.setItem(scheduleResultKey, JSON.stringify(null));
+  renderScheduleResult();
+}
+
 function showToast(type, title, message, duration = 4000) {
   const icons = {
     success: '✅',
@@ -1977,6 +2481,7 @@ function save() {
   localStorage.setItem(key, JSON.stringify(records));
   localStorage.setItem(applianceKey, JSON.stringify(appliances));
   localStorage.setItem(memberKey, JSON.stringify(members));
+  localStorage.setItem(scheduleTaskKey, JSON.stringify(scheduleTasks));
 }
 
 function saveMapping() {
@@ -2220,6 +2725,9 @@ function render() {
   renderTariffComparison();
   renderTariffDetail();
   renderAnomalyAlerts();
+  renderScheduleTaskList();
+  renderScheduleResult();
+  renderScheduleTariffSelect();
   if (showMappingConfig) {
     renderMappingConfig();
   }
