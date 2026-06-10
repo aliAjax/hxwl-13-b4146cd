@@ -2118,16 +2118,14 @@ td button { margin-left: 6px; background: #e4ecff; }
 
 .scheduleBarTrack {
   position: relative;
-  height: 36px;
+  min-height: 36px;
   border-radius: 6px;
   background: #f1f5fb;
-  overflow: hidden;
 }
 
 .scheduleBar {
   position: absolute;
-  top: 3px;
-  bottom: 3px;
+  left: 0;
   border-radius: 4px;
   display: flex;
   align-items: center;

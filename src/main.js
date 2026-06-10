@@ -2028,7 +2028,8 @@ function generateSchedule() {
   }
 
   const HALF_HOUR_SLOTS = 48;
-  const occupied = new Array(HALF_HOUR_SLOTS).fill(null);
+  const MAX_HOUSEHOLD_POWER = 8800;
+  const powerUsage = new Array(HALF_HOUR_SLOTS).fill(0);
 
   const sortedTasks = [...scheduleTasks].sort((a, b) => {
     const aDeadline = timeToMinutes(a.deadline);
@@ -2052,7 +2053,7 @@ function generateSchedule() {
     for (let start = earliestSlot; start + durationSlots <= Math.min(deadlineSlot, HALF_HOUR_SLOTS); start++) {
       let canPlace = true;
       for (let s = start; s < start + durationSlots; s++) {
-        if (occupied[s] !== null) {
+        if (powerUsage[s] + task.watts > MAX_HOUSEHOLD_POWER) {
           canPlace = false;
           break;
         }
@@ -2081,11 +2082,11 @@ function generateSchedule() {
         endSlot: -1,
         cost: 0,
         kwh: (task.watts / 1000) * task.duration,
-        error: '无法在约束范围内排程'
+        error: '无法在约束范围内排程（总功率超限或时间冲突）'
       });
     } else {
       for (let s = bestStart; s < bestStart + durationSlots; s++) {
-        occupied[s] = task.id;
+        powerUsage[s] += task.watts;
       }
       placements.push({
         task,
@@ -2228,15 +2229,31 @@ function renderScheduleTimeline() {
   if (!scheduleResult || !scheduleResult.placements) return;
 
   const HALF_HOUR_SLOTS = 48;
-  const grid = new Array(HALF_HOUR_SLOTS).fill(null);
   const colors = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#be185d'];
+  const BAR_HEIGHT = 28;
+  const TRACK_GAP = 4;
 
-  scheduleResult.placements.forEach(function(placement, idx) {
-    if (placement.startSlot < 0) return;
-    for (let s = placement.startSlot; s < placement.endSlot; s++) {
-      grid[s] = { task: placement.task, color: colors[idx % colors.length], idx };
+  const validPlacements = scheduleResult.placements
+    .map((p, i) => ({ ...p, color: colors[i % colors.length], originalIdx: i }))
+    .filter(p => p.startSlot >= 0);
+
+  const tracks = [];
+  validPlacements.forEach(placement => {
+    let assignedTrack = -1;
+    for (let t = 0; t < tracks.length; t++) {
+      const lastInTrack = tracks[t][tracks[t].length - 1];
+      if (placement.startSlot >= lastInTrack.endSlot) {
+        tracks[t].push(placement);
+        assignedTrack = t;
+        break;
+      }
+    }
+    if (assignedTrack === -1) {
+      tracks.push([placement]);
     }
   });
+
+  const totalHeight = tracks.length * (BAR_HEIGHT + TRACK_GAP);
 
   let html = '<div class="scheduleTimeline">';
   html += '<div class="scheduleTimeAxis">';
@@ -2244,24 +2261,18 @@ function renderScheduleTimeline() {
     html += '<span class="timeTick" style="left:' + (h / 24 * 100) + '%;">' + String(h).padStart(2, '0') + ':00</span>';
   }
   html += '</div>';
-  html += '<div class="scheduleBarTrack">';
+  html += '<div class="scheduleBarTrack" style="height:' + totalHeight + 'px;">';
 
-  let i = 0;
-  while (i < HALF_HOUR_SLOTS) {
-    if (grid[i]) {
-      const startSlot = i;
-      const color = grid[i].color;
-      const taskName = grid[i].task.appliance;
-      while (i < HALF_HOUR_SLOTS && grid[i] && grid[i].idx === grid[startSlot].idx) i++;
-      const leftPct = (startSlot / HALF_HOUR_SLOTS * 100).toFixed(2);
-      const widthPct = ((i - startSlot) / HALF_HOUR_SLOTS * 100).toFixed(2);
-      html += '<div class="scheduleBar" style="left:' + leftPct + '%; width:' + widthPct + '%; background:' + color + ';">' +
-        '<span class="scheduleBarLabel">' + taskName + '</span>' +
+  tracks.forEach((track, trackIdx) => {
+    const topOffset = trackIdx * (BAR_HEIGHT + TRACK_GAP);
+    track.forEach(placement => {
+      const leftPct = (placement.startSlot / HALF_HOUR_SLOTS * 100).toFixed(2);
+      const widthPct = ((placement.endSlot - placement.startSlot) / HALF_HOUR_SLOTS * 100).toFixed(2);
+      html += '<div class="scheduleBar" style="left:' + leftPct + '%; width:' + widthPct + '%; top:' + topOffset + 'px; height:' + BAR_HEIGHT + 'px; background:' + placement.color + ';">' +
+        '<span class="scheduleBarLabel">' + placement.task.appliance + '</span>' +
       '</div>';
-    } else {
-      i++;
-    }
-  }
+    });
+  });
 
   html += '</div></div>';
   container.innerHTML = html;
