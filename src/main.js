@@ -341,7 +341,7 @@ document.querySelector('#app').innerHTML = `
         <input name="date" type="date" required />
         <select name="slot" required>
           <option value="">使用时段</option>
-          <option>清晨</option><option>上午</option><option>午间</option><option>午后</option><option>傍晚</option><option>晚间</option><option>深夜</option><option>全天</option>
+          <option>清晨</option><option>上午</option><option>午间</option><option>下午</option><option>午后</option><option>傍晚</option><option>晚间</option><option>深夜</option><option>全天</option>
         </select>
         <div class="pair">
           <input name="hours" type="number" min="0" step="0.1" placeholder="使用时长h" required />
@@ -368,7 +368,7 @@ document.querySelector('#app').innerHTML = `
           <input name="watts" type="number" min="0" step="1" placeholder="额定功率W" required />
           <select name="slot" required>
             <option value="">默认时段</option>
-            <option>清晨</option><option>上午</option><option>午间</option><option>午后</option><option>傍晚</option><option>晚间</option><option>深夜</option><option>全天</option>
+            <option>清晨</option><option>上午</option><option>午间</option><option>下午</option><option>午后</option><option>傍晚</option><option>晚间</option><option>深夜</option><option>全天</option>
           </select>
           <input name="note" placeholder="备注" />
           <button class="primary">保存</button>
@@ -632,7 +632,7 @@ document.querySelector('#app').innerHTML = `
           <label>时段</label>
           <select id="filterSlot">
             <option value="">全部时段</option>
-            <option>清晨</option><option>上午</option><option>午间</option><option>午后</option><option>傍晚</option><option>晚间</option><option>深夜</option><option>全天</option>
+            <option>清晨</option><option>上午</option><option>午间</option><option>下午</option><option>午后</option><option>傍晚</option><option>晚间</option><option>深夜</option><option>全天</option>
           </select>
         </div>
         <div class="filterItem">
@@ -2945,7 +2945,7 @@ function updateFilterOptions() {
     applianceNames.map(a => `<option value="${a}" ${a === currentApplianceValue ? 'selected' : ''}>${a}</option>`).join('');
 
   const currentSlotValue = filterSlot.value;
-  const slotOptions = ['清晨', '上午', '午间', '午后', '傍晚', '晚间', '深夜', '全天'];
+  const slotOptions = ['清晨', '上午', '午间', '下午', '午后', '傍晚', '晚间', '深夜', '全天'];
   filterSlot.innerHTML = '<option value="">全部时段</option>' +
     slotOptions.map(s => `<option value="${s}" ${s === currentSlotValue ? 'selected' : ''}>${s}</option>`).join('');
 }
