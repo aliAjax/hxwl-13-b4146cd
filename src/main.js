@@ -58,12 +58,14 @@ const slotMappingSeed = {
   '清晨': 'valley',
   '上午': 'flat',
   '午间': 'peak',
+  '下午': 'flat',
   '午后': 'flat',
   '傍晚': 'peak',
   '晚间': 'peak',
   '深夜': 'valley',
   '全天': 'flat'
 };
+const slotOrder = ['清晨', '上午', '午间', '下午', '午后', '傍晚', '晚间', '深夜', '全天'];
 
 const UNASSIGNED_LABEL = '未分配';
 
@@ -1122,7 +1124,7 @@ function validateTimeRanges(ranges) {
 }
 
 function getSlotTier(slot) {
-  return slotMapping[slot] || 'flat';
+  return slotMapping[slot] || slotMappingSeed[slot] || 'flat';
 }
 
 function getTierPrice(tariff, tier) {
@@ -1196,15 +1198,25 @@ function saveTariffData() {
   localStorage.setItem(tariffKey, JSON.stringify(tariffs));
 }
 
+function getMappingSlots() {
+  return [...new Set([
+    ...slotOrder,
+    ...Object.keys(slotMapping),
+    ...records.map(function(record) { return record.slot; }),
+    ...appliances.map(function(appliance) { return appliance.slot; })
+  ].filter(Boolean))];
+}
+
 function renderMappingConfig() {
-  const slots = ['清晨', '上午', '午间', '午后', '傍晚', '晚间', '深夜', '全天'];
+  const slots = getMappingSlots();
   mappingGrid.innerHTML = slots.map(function(slot) {
+    const mappedTier = getSlotTier(slot);
     return '<div class="mappingItem">' +
       '<span class="mappingSlot">' + slot + '</span>' +
       '<select data-slot="' + slot + '">' +
-        '<option value="peak" ' + (slotMapping[slot] === 'peak' ? 'selected' : '') + '>峰时段</option>' +
-        '<option value="flat" ' + (slotMapping[slot] === 'flat' ? 'selected' : '') + '>平时段</option>' +
-        '<option value="valley" ' + (slotMapping[slot] === 'valley' ? 'selected' : '') + '>谷时段</option>' +
+        '<option value="peak" ' + (mappedTier === 'peak' ? 'selected' : '') + '>峰时段</option>' +
+        '<option value="flat" ' + (mappedTier === 'flat' ? 'selected' : '') + '>平时段</option>' +
+        '<option value="valley" ' + (mappedTier === 'valley' ? 'selected' : '') + '>谷时段</option>' +
       '</select>' +
     '</div>';
   }).join('');
