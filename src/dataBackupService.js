@@ -64,6 +64,8 @@ function getCurrentData() {
       } catch (e) {
         data[key] = null;
       }
+    } else {
+      data[key] = null;
     }
   });
   return data;
@@ -84,14 +86,14 @@ function createBackup(options = {}) {
   const allData = getCurrentData();
   const filteredData = {};
 
-  if (includeRecords && allData.records) filteredData.records = allData.records;
-  if (includeAppliances && allData.appliances) filteredData.appliances = allData.appliances;
-  if (includeMembers && allData.members) filteredData.members = allData.members;
-  if (includePriceSettings && allData.priceSettings) filteredData.priceSettings = allData.priceSettings;
-  if (includeGoalSettings && allData.goalSettings) filteredData.goalSettings = allData.goalSettings;
-  if (includeTariffs && allData.tariffs) filteredData.tariffs = allData.tariffs;
-  if (includeSlotMapping && allData.slotMapping) filteredData.slotMapping = allData.slotMapping;
-  if (includeIgnoredAnomalies && allData.ignoredAnomalies) filteredData.ignoredAnomalies = allData.ignoredAnomalies;
+  if (includeRecords) filteredData.records = allData.records ?? [];
+  if (includeAppliances) filteredData.appliances = allData.appliances ?? [];
+  if (includeMembers) filteredData.members = allData.members ?? [];
+  if (includePriceSettings) filteredData.priceSettings = allData.priceSettings ?? null;
+  if (includeGoalSettings) filteredData.goalSettings = allData.goalSettings ?? null;
+  if (includeTariffs) filteredData.tariffs = allData.tariffs ?? [];
+  if (includeSlotMapping) filteredData.slotMapping = allData.slotMapping ?? null;
+  if (includeIgnoredAnomalies) filteredData.ignoredAnomalies = allData.ignoredAnomalies ?? [];
 
   const backup = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -224,8 +226,9 @@ function analyzeDifferences(currentData, importedData) {
     ignoredAnomalies: { action: 'none', count: 0 }
   };
 
-  if (importedData.records && currentData.records) {
-    const currentMap = buildSignatureMap(currentData.records);
+  if (importedData.records) {
+    const currentRecords = currentData.records || [];
+    const currentMap = buildSignatureMap(currentRecords);
 
     importedData.records.forEach(imported => {
       let match = currentMap.get(imported.id);
@@ -268,9 +271,10 @@ function analyzeDifferences(currentData, importedData) {
     });
   }
 
-  if (importedData.appliances && currentData.appliances) {
-    const currentMap = new Map(currentData.appliances.map(a => [a.id, a]));
-    const nameMap = new Map(currentData.appliances.map(a => [a.name, a]));
+  if (importedData.appliances) {
+    const currentAppliances = currentData.appliances || [];
+    const currentMap = new Map(currentAppliances.map(a => [a.id, a]));
+    const nameMap = new Map(currentAppliances.map(a => [a.name, a]));
 
     importedData.appliances.forEach(imported => {
       let match = currentMap.get(imported.id);
@@ -316,9 +320,10 @@ function analyzeDifferences(currentData, importedData) {
     });
   }
 
-  if (importedData.members && currentData.members) {
-    const currentMap = new Map(currentData.members.map(m => [m.id, m]));
-    const nameMap = new Map(currentData.members.map(m => [m.name, m]));
+  if (importedData.members) {
+    const currentMembers = currentData.members || [];
+    const currentMap = new Map(currentMembers.map(m => [m.id, m]));
+    const nameMap = new Map(currentMembers.map(m => [m.name, m]));
 
     importedData.members.forEach(imported => {
       let match = currentMap.get(imported.id);
@@ -396,9 +401,10 @@ function analyzeDifferences(currentData, importedData) {
     }
   }
 
-  if (importedData.tariffs && currentData.tariffs) {
-    const currentMap = new Map(currentData.tariffs.map(t => [t.id, t]));
-    const nameMap = new Map(currentData.tariffs.map(t => [t.name, t]));
+  if (importedData.tariffs) {
+    const currentTariffs = currentData.tariffs || [];
+    const currentMap = new Map(currentTariffs.map(t => [t.id, t]));
+    const nameMap = new Map(currentTariffs.map(t => [t.name, t]));
 
     importedData.tariffs.forEach(imported => {
       let match = currentMap.get(imported.id);
