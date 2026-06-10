@@ -1296,6 +1296,101 @@ td button { margin-left: 6px; background: #e4ecff; }
   to { opacity: 1; }
 }
 
+.confirmModal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 480px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.2);
+  z-index: 9999;
+  animation: modalSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 24px;
+}
+
+.confirmModalHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.confirmModalIcon {
+  font-size: 32px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.confirmModalTitle {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0 0 4px 0;
+}
+
+.confirmModalMessage {
+  font-size: 14px;
+  color: #5c6982;
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-line;
+}
+
+.confirmModalDetails {
+  background: #f8faff;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0 20px 0;
+  font-size: 13px;
+  color: #475569;
+}
+
+.confirmModalDetails div {
+  margin: 4px 0;
+}
+
+.confirmModalDetails strong {
+  color: #1e293b;
+  font-weight: 500;
+}
+
+.confirmModalActions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.confirmModalActions button {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.confirmModalBtnSecondary {
+  background: #e4ecff;
+  color: #334155;
+}
+
+.confirmModalBtnSecondary:hover {
+  background: #cbd5e1;
+}
+
+.confirmModalBtnPrimary {
+  background: #2563eb;
+  color: white;
+}
+
+.confirmModalBtnPrimary:hover {
+  background: #1d4ed8;
+}
+
 .backupRestoreModal {
   position: fixed;
   top: 50%;

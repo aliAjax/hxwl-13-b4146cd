@@ -689,6 +689,8 @@ const confirmBatchAssignBtn = document.querySelector('#confirmBatchAssignBtn');
 const selectAllHeader = document.querySelector('#selectAllHeader');
 const selectAllCheckbox = document.querySelector('#selectAllCheckbox');
 const selectedCountSpan = document.querySelector('#selectedCount');
+const confirmModalOverlay = document.querySelector('#confirmModalOverlay');
+const confirmModal = document.querySelector('#confirmModal');
 
 const filterMonth = document.querySelector('#filterMonth');
 const filterMember = document.querySelector('#filterMember');
@@ -733,6 +735,11 @@ form.addEventListener('submit', (event) => {
   const item = { ...data, hours: Number(data.hours), watts: Number(data.watts), id: editingId || crypto.randomUUID() };
   delete item.applianceSelect;
 
+  const isNewRecord = !editingId;
+  const applianceName = item.appliance.trim();
+  const applianceWatts = item.watts;
+  const applianceSlot = item.slot;
+
   const beforeTotal = getCurrentMonthTotal();
   records = editingId ? records.map((record) => (record.id === editingId ? item : record)) : [item, ...records];
   const afterTotal = getCurrentMonthTotal();
@@ -745,7 +752,46 @@ form.addEventListener('submit', (event) => {
   form.reset();
   save();
   render();
+
+  if (isNewRecord && applianceName) {
+    const existingAppliance = appliances.find(a => a.name.trim() === applianceName);
+    if (!existingAppliance) {
+      setTimeout(() => {
+        showConfirmDialog({
+          title: '加入电器档案',
+          message: `电器「${applianceName}」不在档案中。是否将其加入电器档案？`,
+          icon: '📦',
+          details: [
+            { label: '功率', value: `${applianceWatts}W` },
+            { label: '默认时段', value: applianceSlot || '未设置' }
+          ],
+          confirmText: '加入档案',
+          cancelText: '暂不加入',
+          onConfirm: () => {
+            const newAppliance = {
+              id: crypto.randomUUID(),
+              name: applianceName,
+              watts: applianceWatts,
+              slot: applianceSlot || '',
+              note: ''
+            };
+            appliances = [newAppliance, ...appliances];
+            save();
+            render();
+            showToast('success', '已加入档案', `电器「${applianceName}」已成功加入电器档案`);
+          }
+        });
+      }, 100);
+    }
+  }
 });
+
+function getLastMemberForAppliance(applianceName) {
+  const applianceRecords = records.filter(r => r.appliance === applianceName && r.member);
+  if (applianceRecords.length === 0) return '';
+  applianceRecords.sort((a, b) => b.date.localeCompare(a.date));
+  return applianceRecords[0].member;
+}
 
 applianceSelect.addEventListener('change', (event) => {
   const selectedId = event.target.value;
@@ -755,6 +801,10 @@ applianceSelect.addEventListener('change', (event) => {
     form.elements.appliance.value = appliance.name;
     form.elements.watts.value = appliance.watts;
     form.elements.slot.value = appliance.slot;
+    const lastMember = getLastMemberForAppliance(appliance.name);
+    if (lastMember) {
+      form.elements.member.value = lastMember;
+    }
   }
 });
 
@@ -2576,6 +2626,57 @@ function hideToast(toast) {
       toast.parentNode.removeChild(toast);
     }
   }, 300);
+}
+
+function showConfirmDialog(options) {
+  const { title, message, icon = '📦', details = [], confirmText = '确认', cancelText = '取消', onConfirm, onCancel } = options;
+
+  const detailsHtml = details.length > 0 ? `
+    <div class="confirmModalDetails">
+      ${details.map(d => `<div><strong>${d.label}：</strong>${d.value}</div>`).join('')}
+    </div>
+  ` : '';
+
+  confirmModal.innerHTML = `
+    <div class="confirmModalHeader">
+      <span class="confirmModalIcon">${icon}</span>
+      <div style="flex: 1;">
+        <h3 class="confirmModalTitle">${title}</h3>
+        <p class="confirmModalMessage">${message}</p>
+      </div>
+    </div>
+    ${detailsHtml}
+    <div class="confirmModalActions">
+      <button class="confirmModalBtnSecondary" id="confirmModalCancelBtn">${cancelText}</button>
+      <button class="confirmModalBtnPrimary" id="confirmModalConfirmBtn">${confirmText}</button>
+    </div>
+  `;
+
+  confirmModalOverlay.style.display = 'block';
+  confirmModal.style.display = 'block';
+
+  const cancelBtn = document.querySelector('#confirmModalCancelBtn');
+  const confirmBtn = document.querySelector('#confirmModalConfirmBtn');
+
+  const closeDialog = () => {
+    confirmModalOverlay.style.display = 'none';
+    confirmModal.style.display = 'none';
+  };
+
+  cancelBtn.addEventListener('click', () => {
+    closeDialog();
+    if (onCancel) onCancel();
+  });
+
+  confirmBtn.addEventListener('click', () => {
+    closeDialog();
+    if (onConfirm) onConfirm();
+  });
+
+  confirmModalOverlay.addEventListener('click', () => {
+    closeDialog();
+    if (onCancel) onCancel();
+  }, { once: true });
 }
 
 function getCurrentMonthTotal() {
