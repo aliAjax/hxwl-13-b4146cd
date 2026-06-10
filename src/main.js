@@ -651,7 +651,7 @@ confirmBatchAssignBtn.addEventListener('click', () => {
 });
 
 selectAllCheckbox.addEventListener('change', (e) => {
-  const filtered = records.filter((record) => [record.appliance, record.note, record.slot].join(' ').includes(search.value.trim()));
+  const filtered = records.filter((record) => [record.date, record.appliance, record.note, record.slot].join(' ').includes(search.value.trim()));
   if (e.target.checked) {
     selectedRecordIds = filtered.map(r => r.id);
   } else {
@@ -1455,6 +1455,14 @@ function renderAnomalyAlerts() {
         const searchInput = document.querySelector('#search');
         searchInput.value = date;
         render();
+        setTimeout(() => {
+          const firstRow = document.querySelector('#rows tr[data-record-id]');
+          if (firstRow) {
+            firstRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            firstRow.classList.add('highlight-row');
+            setTimeout(() => firstRow.classList.remove('highlight-row'), 3000);
+          }
+        }, 100);
         showToast('info', '已筛选', `已筛选 ${date} 的所有用电记录`);
       } else if (recordId) {
         locateToRecord(recordId);
@@ -2142,7 +2150,7 @@ function renderMemberStats() {
 }
 
 function render() {
-  const filtered = records.filter(function(record) { return [record.appliance, record.note, record.slot, getMemberName(record)].join(' ').includes(search.value.trim()); });
+  const filtered = records.filter(function(record) { return [record.date, record.appliance, record.note, record.slot, getMemberName(record)].join(' ').includes(search.value.trim()); });
   const total = records.reduce(function(sum, record) { return sum + kwh(record); }, 0);
   document.querySelector('#summary').innerHTML = [
     ['总估算耗电', total.toFixed(2) + 'kWh'],
