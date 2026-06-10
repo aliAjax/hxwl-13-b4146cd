@@ -1000,3 +1000,274 @@ td button { margin-left: 6px; background: #e4ecff; }
     gap: 4px;
   }
 }
+
+#anomalyAlertSection {
+  margin-top: 18px;
+}
+
+.anomalyActions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.anomalyStats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+
+@media (max-width: 768px) {
+  .anomalyStats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.anomalyStat {
+  padding: 16px;
+  border-radius: 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #d5deee;
+}
+
+.anomalyStat.high {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border-color: #fecaca;
+}
+
+.anomalyStat.medium {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border-color: #fde68a;
+}
+
+.anomalyStat.active {
+  background: linear-gradient(135deg, #f0f7ff 0%, #e6f0ff 100%);
+  border-color: #bfdbfe;
+}
+
+.anomalyStat.ignored {
+  background: linear-gradient(135deg, #f5f5f5 0%, #e5e5e5 100%);
+  border-color: #d4d4d4;
+}
+
+.anomalyStat span {
+  font-size: 13px;
+  color: #5c6982;
+}
+
+.anomalyStat strong {
+  font-size: 24px;
+  color: #172033;
+}
+
+.anomalyStat.high strong {
+  color: #dc2626;
+}
+
+.anomalyStat.medium strong {
+  color: #d97706;
+}
+
+.anomalyStat.active strong {
+  color: #2563eb;
+}
+
+.anomalyStat.ignored strong {
+  color: #6b7280;
+}
+
+.anomalyDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-bottom: 4px;
+}
+
+.anomalyStat.high .anomalyDot {
+  background: #dc2626;
+  box-shadow: 0 0 8px rgba(220, 38, 38, 0.5);
+  animation: pulseDot 2s infinite;
+}
+
+.anomalyStat.medium .anomalyDot {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.anomalyEmpty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #5c6982;
+}
+
+.anomalyEmptyIcon {
+  font-size: 48px;
+  display: block;
+  margin-bottom: 12px;
+}
+
+.anomalyEmpty p {
+  font-size: 16px;
+  margin: 0 0 8px 0;
+  color: #172033;
+}
+
+.anomalyEmptyHint {
+  font-size: 13px;
+  color: #8b95a8;
+}
+
+.anomalyCard {
+  border: 1px solid #d5deee;
+  border-radius: 10px;
+  background: white;
+  margin-bottom: 12px;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.anomalyCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(32, 47, 78, 0.12);
+}
+
+.anomalyCard.high {
+  border-left: 4px solid #dc2626;
+}
+
+.anomalyCard.medium {
+  border-left: 4px solid #f59e0b;
+}
+
+.anomalyCard.ignored {
+  opacity: 0.6;
+}
+
+.anomalyCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  background: #f8faff;
+  border-bottom: 1px solid #e5ebf5;
+}
+
+.anomalyCard.high .anomalyCardHeader {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+}
+
+.anomalyCard.medium .anomalyCardHeader {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+}
+
+.anomalyType {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.anomalyIcon {
+  font-size: 18px;
+}
+
+.anomalyTypeLabel {
+  font-weight: 600;
+  color: #172033;
+}
+
+.anomalySeverity {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.anomalySeverity.high {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.anomalySeverity.medium {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.anomalyDate {
+  font-size: 13px;
+  color: #5c6982;
+}
+
+.anomalyCardBody {
+  padding: 14px 16px;
+}
+
+.anomalyMessage {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: #172033;
+  font-weight: 500;
+}
+
+.anomalyDetails {
+  margin: 0;
+  font-size: 13px;
+  color: #5c6982;
+}
+
+.anomalyCardActions {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+  background: #f8faff;
+  border-top: 1px solid #e5ebf5;
+}
+
+.anomalyBtn {
+  flex: 1;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.anomalyBtn.locate {
+  background: #eef4ff;
+  color: #2563eb;
+}
+
+.anomalyBtn.locate:hover {
+  background: #dbeafe;
+}
+
+.anomalyBtn.ignore {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.anomalyBtn.ignore:hover {
+  background: #e5e7eb;
+}
+
+.highlight-row {
+  background: #fef3c7 !important;
+  animation: highlightPulse 0.5s ease-in-out 3;
+}
+
+@keyframes highlightPulse {
+  0%, 100% { background: #fef3c7; }
+  50% { background: #fde68a; }
+}

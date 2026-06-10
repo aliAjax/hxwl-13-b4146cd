@@ -7,12 +7,26 @@ const goalKey = 'hxwl-13-home-energy-goal';
 const memberKey = 'hxwl-13-home-energy-members';
 const tariffKey = 'hxwl-13-home-energy-tariffs';
 const slotMappingKey = 'hxwl-13-home-energy-slot-mapping';
+const anomalyIgnoreKey = 'hxwl-13-home-energy-anomaly-ignore';
 const seed = [
-  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-04', slot: '晚间', hours: 5.5, watts: 900, note: '睡前开启', member: '爸爸' },
-  { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-04', slot: '傍晚', hours: 1.2, watts: 1800, note: '洗澡前加热', member: '妈妈' },
+  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-01', slot: '晚间', hours: 4, watts: 900, note: '睡前开启', member: '爸爸' },
+  { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-01', slot: '傍晚', hours: 1.2, watts: 1800, note: '洗澡前加热', member: '妈妈' },
+  { id: crypto.randomUUID(), appliance: '洗衣机', date: '2026-06-02', slot: '上午', hours: 1, watts: 420, note: '快洗模式', member: '妈妈' },
+  { id: crypto.randomUUID(), appliance: '台式电脑', date: '2026-06-02', slot: '下午', hours: 3, watts: 260, note: '学习', member: '小明' },
+  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-03', slot: '晚间', hours: 4.5, watts: 900, note: '睡前开启', member: '爸爸' },
+  { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-03', slot: '傍晚', hours: 1, watts: 1800, note: '洗澡', member: '妈妈' },
+  { id: crypto.randomUUID(), appliance: '冰箱', date: '2026-06-03', slot: '全天', hours: 24, watts: 120, note: '', member: '' },
+  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-04', slot: '晚间', hours: 12, watts: 900, note: '忘记关了', member: '爸爸' },
+  { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-04', slot: '傍晚', hours: 5, watts: 1800, note: '长时间加热', member: '妈妈' },
   { id: crypto.randomUUID(), appliance: '洗衣机', date: '2026-06-05', slot: '上午', hours: 1, watts: 420, note: '快洗模式', member: '妈妈' },
-  { id: crypto.randomUUID(), appliance: '台式电脑', date: '2026-06-05', slot: '下午', hours: 4, watts: 260, note: '剪辑文件', member: '小明' },
-  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-06', slot: '午后', hours: 3.5, watts: 900, note: '客厅降温', member: '' }
+  { id: crypto.randomUUID(), appliance: '台式电脑', date: '2026-06-05', slot: '下午', hours: 8, watts: 260, note: '玩游戏', member: '小明' },
+  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-06', slot: '全天', hours: 20, watts: 900, note: '天气太热', member: '' },
+  { id: crypto.randomUUID(), appliance: '微波炉', date: '2026-06-06', slot: '午间', hours: 0.5, watts: 800, note: '加热饭菜', member: '妈妈' },
+  { id: crypto.randomUUID(), appliance: '冰箱', date: '2026-06-06', slot: '全天', hours: 24, watts: 120, note: '', member: '' },
+  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-07', slot: '全天', hours: 18, watts: 900, note: '天气太热', member: '' },
+  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-08', slot: '全天', hours: 22, watts: 900, note: '持续高温', member: '' },
+  { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-09', slot: '全天', hours: 24, watts: 900, note: '极端高温', member: '' },
+  { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-09', slot: '全天', hours: 10, watts: 1800, note: '忘记关闭', member: '妈妈' }
 ];
 const applianceSeed = [
   { id: crypto.randomUUID(), name: '空调', watts: 900, slot: '晚间', note: '卧室挂机' },
@@ -98,8 +112,11 @@ let editingTariffId = null;
 let selectedTariffIds = [];
 let showTariffForm = false;
 let showMappingConfig = false;
+let ignoredAnomalies = JSON.parse(localStorage.getItem(anomalyIgnoreKey) || '[]');
+let showIgnoredAnomalies = false;
 
 document.querySelector('#app').innerHTML = `
+  <div id="toastContainer" class="toastContainer"></div>
   <main class="shell">
     <header class="hero">
       <div>
@@ -159,6 +176,18 @@ document.querySelector('#app').innerHTML = `
           </div>
         </form>
       </div>
+    </section>
+
+    <section class="panel" id="anomalyAlertSection">
+      <div class="panelHead">
+        <h2>⚠️ 异常用电提醒</h2>
+        <div class="anomalyActions">
+          <button id="toggleIgnoredBtn" class="primary">显示已忽略</button>
+          <button id="clearIgnoredBtn" style="background:#fee2e2; color:#dc2626;">清除忽略记录</button>
+        </div>
+      </div>
+      <div id="anomalyStats" class="anomalyStats"></div>
+      <div id="anomalyListContainer" style="margin-top:16px;"></div>
     </section>
 
     <section class="panel" id="csvImportSection">
@@ -471,6 +500,10 @@ const mappingGrid = document.querySelector('#mappingGrid');
 const tariffList = document.querySelector('#tariffList');
 const tariffComparisonContainer = document.querySelector('#tariffComparisonContainer');
 const tariffDetailRows = document.querySelector('#tariffDetailRows');
+const anomalyStats = document.querySelector('#anomalyStats');
+const anomalyListContainer = document.querySelector('#anomalyListContainer');
+const toggleIgnoredBtn = document.querySelector('#toggleIgnoredBtn');
+const clearIgnoredBtn = document.querySelector('#clearIgnoredBtn');
 
 priceForm.elements.price.value = priceSettings.price;
 priceForm.elements.month.value = priceSettings.month;
@@ -1118,9 +1151,332 @@ resetMappingBtn.addEventListener('click', () => {
 comparisonMonthSelect.addEventListener('change', renderTariffComparison);
 detailTariffSelect.addEventListener('change', renderTariffDetail);
 
+toggleIgnoredBtn.addEventListener('click', () => {
+  showIgnoredAnomalies = !showIgnoredAnomalies;
+  toggleIgnoredBtn.textContent = showIgnoredAnomalies ? '隐藏已忽略' : '显示已忽略';
+  toggleIgnoredBtn.style.background = showIgnoredAnomalies ? '#64748b' : '';
+  renderAnomalyAlerts();
+});
+
+clearIgnoredBtn.addEventListener('click', () => {
+  if (ignoredAnomalies.length === 0) {
+    showToast('info', '提示', '没有已忽略的异常记录');
+    return;
+  }
+  if (confirm('确定要清除所有已忽略的异常记录吗？')) {
+    ignoredAnomalies = [];
+    localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
+    showToast('success', '已清除', '所有忽略记录已清除');
+    render();
+  }
+});
+
 function validateTimeRanges(ranges) {
   const timeRegex = /^\d{2}:\d{2}-\d{2}:\d{2}$/;
   return ranges.every(range => timeRegex.test(range));
+}
+
+function getAnomalyId(type, recordId, date) {
+  return `${type}-${recordId || date}`;
+}
+
+function isAnomalyIgnored(anomalyId) {
+  return ignoredAnomalies.includes(anomalyId);
+}
+
+function ignoreAnomaly(anomalyId) {
+  if (!ignoredAnomalies.includes(anomalyId)) {
+    ignoredAnomalies.push(anomalyId);
+    localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
+  }
+}
+
+function unignoreAnomaly(anomalyId) {
+  ignoredAnomalies = ignoredAnomalies.filter(id => id !== anomalyId);
+  localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
+}
+
+function detectHighSingleUsage() {
+  const anomalies = [];
+  const applianceRecords = new Map();
+
+  records.forEach(record => {
+    if (!applianceRecords.has(record.appliance)) {
+      applianceRecords.set(record.appliance, []);
+    }
+    applianceRecords.get(record.appliance).push(record);
+  });
+
+  applianceRecords.forEach((applianceRecs, appliance) => {
+    if (applianceRecs.length < 2) return;
+
+    const kwhValues = applianceRecs.map(r => kwh(r)).sort((a, b) => a - b);
+    const mean = kwhValues.reduce((a, b) => a + b, 0) / kwhValues.length;
+    const variance = kwhValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / kwhValues.length;
+    const stdDev = Math.sqrt(variance);
+    const threshold = mean + 1.5 * stdDev;
+
+    applianceRecs.forEach(record => {
+      const recordKwh = kwh(record);
+      if (recordKwh > threshold && recordKwh > mean * 1.3) {
+        const anomalyId = getAnomalyId('high-single', record.id);
+        if (!showIgnoredAnomalies && isAnomalyIgnored(anomalyId)) return;
+
+        anomalies.push({
+          id: anomalyId,
+          type: 'high-single',
+          typeLabel: '单次耗电偏高',
+          severity: recordKwh > mean * 2 ? 'high' : 'medium',
+          record,
+          recordId: record.id,
+          date: record.date,
+          appliance: record.appliance,
+          message: `${record.appliance} 单次耗电 ${recordKwh.toFixed(2)}kWh，超出平均值 ${((recordKwh / mean - 1) * 100).toFixed(0)}%`,
+          details: `该电器历史平均耗电：${mean.toFixed(2)}kWh，异常阈值：${threshold.toFixed(2)}kWh`,
+          ignored: isAnomalyIgnored(anomalyId)
+        });
+      }
+    });
+  });
+
+  return anomalies;
+}
+
+function detectDailySpike() {
+  const anomalies = [];
+  const dailyTotals = new Map();
+
+  records.forEach(record => {
+    const current = dailyTotals.get(record.date) || 0;
+    dailyTotals.set(record.date, current + kwh(record));
+  });
+
+  const totals = Array.from(dailyTotals.values()).sort((a, b) => a - b);
+  if (totals.length < 2) return anomalies;
+
+  const mean = totals.reduce((a, b) => a + b, 0) / totals.length;
+  const variance = totals.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / totals.length;
+  const stdDev = Math.sqrt(variance);
+  const threshold = mean + 1.5 * stdDev;
+
+  dailyTotals.forEach((total, date) => {
+    if (total > threshold && total > mean * 1.3) {
+      const dayRecords = records.filter(r => r.date === date);
+      const anomalyId = getAnomalyId('daily-spike', null, date);
+      if (!showIgnoredAnomalies && isAnomalyIgnored(anomalyId)) return;
+
+      anomalies.push({
+        id: anomalyId,
+        type: 'daily-spike',
+        typeLabel: '日耗电突增',
+        severity: total > mean * 2 ? 'high' : 'medium',
+        date,
+        recordIds: dayRecords.map(r => r.id),
+        message: `${date} 总耗电 ${total.toFixed(2)}kWh，超出日均 ${((total / mean - 1) * 100).toFixed(0)}%`,
+        details: `历史日均耗电：${mean.toFixed(2)}kWh，异常阈值：${threshold.toFixed(2)}kWh，当日记录：${dayRecords.length}条`,
+        ignored: isAnomalyIgnored(anomalyId)
+      });
+    }
+  });
+
+  return anomalies;
+}
+
+function detectAbnormalDuration() {
+  const anomalies = [];
+  const applianceRecords = new Map();
+
+  records.forEach(record => {
+    if (!applianceRecords.has(record.appliance)) {
+      applianceRecords.set(record.appliance, []);
+    }
+    applianceRecords.get(record.appliance).push(record);
+  });
+
+  applianceRecords.forEach((applianceRecs, appliance) => {
+    if (applianceRecs.length < 2) return;
+
+    const hoursValues = applianceRecs.map(r => r.hours).sort((a, b) => a - b);
+    const mean = hoursValues.reduce((a, b) => a + b, 0) / hoursValues.length;
+    const variance = hoursValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / hoursValues.length;
+    const stdDev = Math.sqrt(variance);
+    const threshold = mean + 1.5 * stdDev;
+
+    applianceRecs.forEach(record => {
+      if (record.hours > threshold && record.hours > mean * 1.3) {
+        const anomalyId = getAnomalyId('duration', record.id);
+        if (!showIgnoredAnomalies && isAnomalyIgnored(anomalyId)) return;
+
+        anomalies.push({
+          id: anomalyId,
+          type: 'duration',
+          typeLabel: '使用时长异常',
+          severity: record.hours > mean * 2 ? 'high' : 'medium',
+          record,
+          recordId: record.id,
+          date: record.date,
+          appliance: record.appliance,
+          message: `${record.appliance} 使用时长 ${record.hours.toFixed(1)}小时，超出平均值 ${((record.hours / mean - 1) * 100).toFixed(0)}%`,
+          details: `该电器历史平均时长：${mean.toFixed(1)}小时，异常阈值：${threshold.toFixed(1)}小时`,
+          ignored: isAnomalyIgnored(anomalyId)
+        });
+      }
+    });
+  });
+
+  return anomalies;
+}
+
+function getAllAnomalies() {
+  return [
+    ...detectHighSingleUsage(),
+    ...detectDailySpike(),
+    ...detectAbnormalDuration()
+  ].sort((a, b) => {
+    if (a.severity === 'high' && b.severity !== 'high') return -1;
+    if (b.severity === 'high' && a.severity !== 'high') return 1;
+    return b.date.localeCompare(a.date);
+  });
+}
+
+function locateToRecord(recordId) {
+  const row = document.querySelector(`#rows tr[data-record-id="${recordId}"]`);
+  if (row) {
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    row.classList.add('highlight-row');
+    setTimeout(() => row.classList.remove('highlight-row'), 3000);
+  } else {
+    const searchInput = document.querySelector('#search');
+    const record = records.find(r => r.id === recordId);
+    if (record) {
+      searchInput.value = record.appliance;
+      render();
+      setTimeout(() => {
+        const newRow = document.querySelector(`#rows tr[data-record-id="${recordId}"]`);
+        if (newRow) {
+          newRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          newRow.classList.add('highlight-row');
+          setTimeout(() => newRow.classList.remove('highlight-row'), 3000);
+        }
+      }, 100);
+    }
+  }
+}
+
+function renderAnomalyAlerts() {
+  const anomalies = getAllAnomalies();
+  const highCount = anomalies.filter(a => a.severity === 'high' && !a.ignored).length;
+  const mediumCount = anomalies.filter(a => a.severity === 'medium' && !a.ignored).length;
+  const ignoredCount = anomalies.filter(a => a.ignored).length;
+  const activeCount = anomalies.filter(a => !a.ignored).length;
+
+  anomalyStats.innerHTML = `
+    <span class="anomalyStat high">
+      <span class="anomalyDot"></span>
+      <strong>${highCount}</strong>
+      <span>高危异常</span>
+    </span>
+    <span class="anomalyStat medium">
+      <span class="anomalyDot"></span>
+      <strong>${mediumCount}</strong>
+      <span>中等异常</span>
+    </span>
+    <span class="anomalyStat active">
+      <strong>${activeCount}</strong>
+      <span>待处理</span>
+    </span>
+    <span class="anomalyStat ignored">
+      <strong>${ignoredCount}</strong>
+      <span>已忽略</span>
+    </span>
+  `;
+
+  if (anomalies.length === 0) {
+    anomalyListContainer.innerHTML = `
+      <div class="anomalyEmpty">
+        <span class="anomalyEmptyIcon">✅</span>
+        <p>暂无异常用电记录</p>
+        <span class="anomalyEmptyHint">系统会持续监控用电数据，发现异常将在此处提醒</span>
+      </div>
+    `;
+    return;
+  }
+
+  if (!showIgnoredAnomalies && activeCount === 0) {
+    anomalyListContainer.innerHTML = `
+      <div class="anomalyEmpty">
+        <span class="anomalyEmptyIcon">📋</span>
+        <p>所有异常已处理</p>
+        <span class="anomalyEmptyHint">点击「显示已忽略」查看已忽略的异常记录</span>
+      </div>
+    `;
+    return;
+  }
+
+  anomalyListContainer.innerHTML = anomalies.map(anomaly => {
+    const severityClass = anomaly.severity === 'high' ? 'high' : 'medium';
+    const typeIcon = anomaly.type === 'high-single' ? '⚡' : anomaly.type === 'daily-spike' ? '📈' : '⏰';
+    const ignoreText = anomaly.ignored ? '取消忽略' : '忽略';
+    const locateText = anomaly.type === 'daily-spike' ? '查看当日记录' : '定位记录';
+
+    return `
+      <div class="anomalyCard ${severityClass} ${anomaly.ignored ? 'ignored' : ''}" data-anomaly-id="${anomaly.id}">
+        <div class="anomalyCardHeader">
+          <div class="anomalyType">
+            <span class="anomalyIcon">${typeIcon}</span>
+            <span class="anomalyTypeLabel">${anomaly.typeLabel}</span>
+            <span class="anomalySeverity ${severityClass}">${anomaly.severity === 'high' ? '高危' : '中等'}</span>
+          </div>
+          <span class="anomalyDate">${anomaly.date}</span>
+        </div>
+        <div class="anomalyCardBody">
+          <p class="anomalyMessage">${anomaly.message}</p>
+          <p class="anomalyDetails">${anomaly.details}</p>
+        </div>
+        <div class="anomalyCardActions">
+          <button class="anomalyBtn locate" data-locate="${anomaly.recordId || ''}" data-date="${anomaly.date || ''}" data-type="${anomaly.type}">
+            ${locateText}
+          </button>
+          <button class="anomalyBtn ignore" data-ignore="${anomaly.id}" data-ignored="${anomaly.ignored}">
+            ${ignoreText}
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  anomalyListContainer.querySelectorAll('[data-locate]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const recordId = btn.dataset.locate;
+      const date = btn.dataset.date;
+      const type = btn.dataset.type;
+
+      if (type === 'daily-spike') {
+        const searchInput = document.querySelector('#search');
+        searchInput.value = date;
+        render();
+        showToast('info', '已筛选', `已筛选 ${date} 的所有用电记录`);
+      } else if (recordId) {
+        locateToRecord(recordId);
+      }
+    });
+  });
+
+  anomalyListContainer.querySelectorAll('[data-ignore]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const anomalyId = btn.dataset.ignore;
+      const isIgnored = btn.dataset.ignored === 'true';
+
+      if (isIgnored) {
+        unignoreAnomaly(anomalyId);
+        showToast('success', '已取消忽略', '该异常提醒已恢复显示');
+      } else {
+        ignoreAnomaly(anomalyId);
+        showToast('success', '已忽略', '刷新页面后该异常将不再显示');
+      }
+      renderAnomalyAlerts();
+    });
+  });
 }
 
 function getSlotTier(slot) {
@@ -1809,6 +2165,7 @@ function render() {
   renderTariffSelects();
   renderTariffComparison();
   renderTariffDetail();
+  renderAnomalyAlerts();
   if (showMappingConfig) {
     renderMappingConfig();
   }
@@ -1825,7 +2182,7 @@ function render() {
       ? '<span class="unassignedMember">' + UNASSIGNED_LABEL + '</span>'
       : memberName;
 
-    let rowHtml = '<tr>';
+    let rowHtml = '<tr data-record-id="' + record.id + '">';
     if (batchAssignMode) {
       rowHtml += '<td><input type="checkbox" class="recordCheckbox" data-id="' + record.id + '" ' + (isChecked ? 'checked' : '') + ' /></td>';
     }
