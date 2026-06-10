@@ -130,10 +130,14 @@ td button { margin-left: 6px; background: #e4ecff; }
 }
 .csvStats .stat.total { background: #eef4ff; color: #2563eb; }
 .csvStats .stat.valid { background: #ecfdf5; color: #16a34a; }
+.csvStats .stat.duplicate { background: #fff7ed; color: #ea580c; }
 .csvStats .stat.invalid { background: #fef2f2; color: #dc2626; }
 .csvPreviewTable td.invalid {
   background: #fef2f2 !important;
   color: #dc2626;
+}
+.csvPreviewTable tr.row-duplicate td {
+  background: #fff7ed !important;
 }
 .csvPreviewTable td.warning {
   background: #fffbeb !important;
@@ -149,6 +153,10 @@ td button { margin-left: 6px; background: #e4ecff; }
 .csvPreviewTable .statusBadge.valid {
   background: #dcfce7;
   color: #166534;
+}
+.csvPreviewTable .statusBadge.duplicate {
+  background: #ffedd5;
+  color: #9a3412;
 }
 .csvPreviewTable .statusBadge.invalid {
   background: #fee2e2;

@@ -282,7 +282,23 @@ document.querySelector('#app').innerHTML = `
           </thead>
           <tbody id="csvPreviewRows"></tbody>
         </table></div>
-        <div style="margin-top:16px; display:flex; gap:12px; justify-content:flex-end;">
+        <div style="margin-top:16px; display:flex; gap:12px; justify-content:flex-end; flex-wrap:wrap;">
+          <div id="duplicateOptions" class="duplicateOptions" style="display:none; width:100%; margin-bottom:12px; padding:14px 16px; background:#fff7ed; border:1px solid #fdba74; border-radius:8px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+              <span style="font-size:18px;">⚠️</span>
+              <span style="font-weight:600; color:#9a3412;">检测到 <span id="duplicateCountLabel">0</span> 条疑似重复记录，请选择处理方式：</span>
+            </div>
+            <div style="display:flex; gap:24px; flex-wrap:wrap;">
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:#7c2d12;">
+                <input type="radio" name="duplicateAction" value="skip" checked />
+                <span>跳过重复记录（推荐）</span>
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:#7c2d12;">
+                <input type="radio" name="duplicateAction" value="import" />
+                <span>仍然导入所有记录</span>
+              </label>
+            </div>
+          </div>
           <button id="cancelCsvBtn" style="background:#e4ecff; border:0; border-radius:6px; padding:11px 24px;">取消</button>
           <button id="confirmCsvBtn" class="primary">确认导入</button>
         </div>
@@ -1030,27 +1046,95 @@ function validateRow(row, index, headers) {
     errors,
     warnings,
     fieldStatus,
-    isValid: errors.length === 0
+    isValid: errors.length === 0,
+    isDuplicate: false,
+    duplicateWithExisting: false,
+    duplicateWithCsv: false
   };
+}
+
+function generateRecordFingerprint(data) {
+  if (!data.date || !data.appliance || !data.slot) return null;
+  const hours = data.hours !== undefined && data.hours !== null ? Number(data.hours) : null;
+  const watts = data.watts !== undefined && data.watts !== null ? Number(data.watts) : null;
+  if (hours === null || isNaN(hours) || watts === null || isNaN(watts)) return null;
+  return `${data.date}|${data.appliance.trim()}|${data.slot.trim()}|${hours}|${watts}`;
+}
+
+function detectDuplicates(validatedRows) {
+  const csvFingerprints = new Map();
+  const existingFingerprints = new Set();
+
+  records.forEach(record => {
+    const fp = generateRecordFingerprint(record);
+    if (fp) existingFingerprints.add(fp);
+  });
+
+  validatedRows.forEach(row => {
+    if (!row.isValid) return;
+    const fp = generateRecordFingerprint(row.data);
+    if (!fp) return;
+
+    if (existingFingerprints.has(fp)) {
+      row.isDuplicate = true;
+      row.duplicateWithExisting = true;
+      if (!row.warnings.includes('与现有用电记录重复')) {
+        row.warnings.push('与现有用电记录重复');
+      }
+    }
+
+    if (csvFingerprints.has(fp)) {
+      const firstRow = csvFingerprints.get(fp);
+      row.isDuplicate = true;
+      row.duplicateWithCsv = true;
+      firstRow.isDuplicate = true;
+      firstRow.duplicateWithCsv = true;
+      if (!row.warnings.includes('CSV文件内存在重复记录')) {
+        row.warnings.push('CSV文件内存在重复记录');
+      }
+      if (!firstRow.warnings.includes('CSV文件内存在重复记录')) {
+        firstRow.warnings.push('CSV文件内存在重复记录');
+      }
+    } else {
+      csvFingerprints.set(fp, row);
+    }
+  });
+
+  return validatedRows;
 }
 
 function renderCsvPreview(validatedRows) {
   const validCount = validatedRows.filter(r => r.isValid).length;
   const invalidCount = validatedRows.length - validCount;
+  const duplicateCount = validatedRows.filter(r => r.isValid && r.isDuplicate).length;
+  const validNonDuplicateCount = validCount - duplicateCount;
 
   csvStats.innerHTML = `
     <span class="stat total">共 ${validatedRows.length} 条记录</span>
-    <span class="stat valid">有效 ${validCount} 条</span>
+    <span class="stat valid">有效 ${validNonDuplicateCount} 条</span>
+    <span class="stat duplicate">疑似重复 ${duplicateCount} 条</span>
     <span class="stat invalid">无效 ${invalidCount} 条</span>
   `;
 
   csvPreviewRows.innerHTML = validatedRows.map(row => {
     const allErrors = [...row.errors, ...row.warnings].join('；');
-    const statusClass = row.isValid ? 'valid' : 'invalid';
-    const statusText = row.isValid ? '有效' : '无效';
+    let statusClass;
+    let statusText;
+    let rowClass = '';
+    if (!row.isValid) {
+      statusClass = 'invalid';
+      statusText = '无效';
+    } else if (row.isDuplicate) {
+      statusClass = 'duplicate';
+      statusText = '疑似重复';
+      rowClass = 'row-duplicate';
+    } else {
+      statusClass = 'valid';
+      statusText = '有效';
+    }
 
     return `
-      <tr>
+      <tr class="${rowClass}">
         <td>${row.rowNumber}</td>
         <td class="${row.fieldStatus.date}">${row.data.date || ''}
           ${row.fieldStatus.date === 'invalid' ? `<span class="errorTooltip">${row.errors.find(e => e.includes('日期')) || ''}</span>` : ''}
@@ -1079,6 +1163,15 @@ function renderCsvPreview(validatedRows) {
 
   csvPreviewContainer.style.display = 'block';
   csvDropZone.style.display = 'none';
+
+  const duplicateOptions = document.querySelector('#duplicateOptions');
+  const duplicateCountLabel = document.querySelector('#duplicateCountLabel');
+  if (duplicateCount > 0) {
+    duplicateOptions.style.display = 'block';
+    duplicateCountLabel.textContent = duplicateCount;
+  } else {
+    duplicateOptions.style.display = 'none';
+  }
 }
 
 function handleCsvFile(file) {
@@ -1104,8 +1197,9 @@ function handleCsvFile(file) {
       }
 
       const validated = rows.slice(1).map((row, i) => validateRow(row, i, headers));
-      parsedCsvData = validated;
-      renderCsvPreview(validated);
+      const withDuplicates = detectDuplicates(validated);
+      parsedCsvData = withDuplicates;
+      renderCsvPreview(withDuplicates);
     } catch (err) {
       alert('解析CSV文件失败：' + err.message);
     }
@@ -1158,7 +1252,25 @@ confirmCsvBtn.addEventListener('click', () => {
     return;
   }
 
-  const newRecords = validRows.map(r => ({
+  const duplicateRows = validRows.filter(r => r.isDuplicate);
+  const duplicateAction = document.querySelector('input[name="duplicateAction"]:checked')?.value || 'skip';
+
+  let rowsToImport;
+  let skippedDuplicateCount = 0;
+
+  if (duplicateRows.length > 0 && duplicateAction === 'skip') {
+    rowsToImport = validRows.filter(r => !r.isDuplicate);
+    skippedDuplicateCount = duplicateRows.length;
+  } else {
+    rowsToImport = validRows;
+  }
+
+  if (rowsToImport.length === 0) {
+    alert('没有可导入的记录（所有有效记录均为重复记录，已全部跳过）');
+    return;
+  }
+
+  const newRecords = rowsToImport.map(r => ({
     id: crypto.randomUUID(),
     date: r.data.date,
     appliance: r.data.appliance,
@@ -1181,16 +1293,19 @@ confirmCsvBtn.addEventListener('click', () => {
   render();
 
   const invalidCount = parsedCsvData.length - validRows.length;
-  if (invalidCount > 0) {
-    alert(`成功导入 ${validRows.length} 条记录\n${invalidCount} 条无效记录已跳过`);
-  } else {
-    alert(`成功导入 ${validRows.length} 条记录`);
-  }
+  let message = `成功导入 ${rowsToImport.length} 条记录`;
+  const details = [];
+  if (invalidCount > 0) details.push(`${invalidCount} 条无效记录已跳过`);
+  if (skippedDuplicateCount > 0) details.push(`${skippedDuplicateCount} 条重复记录已跳过`);
+  if (duplicateRows.length > 0 && duplicateAction === 'import') details.push(`${duplicateRows.length} 条重复记录已导入`);
+  if (details.length > 0) message += `\n${details.join('\n')}`;
+  alert(message);
 
   parsedCsvData = [];
   csvPreviewContainer.style.display = 'none';
   csvDropZone.style.display = 'block';
   csvFileInput.value = '';
+  document.querySelector('#duplicateOptions').style.display = 'none';
 });
 
 downloadTemplateBtn.addEventListener('click', () => {
