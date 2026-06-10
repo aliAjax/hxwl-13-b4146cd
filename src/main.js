@@ -1,4 +1,14 @@
 import './styles.css';
+import {
+  BACKUP_SCHEMA_VERSION,
+  exportBackup,
+  parseBackupFile,
+  migrateBackup,
+  analyzeDifferences,
+  applyRestore,
+  validateBackup,
+  getCurrentData
+} from './dataBackupService.js';
 
 const key = 'hxwl-13-home-energy';
 const priceKey = 'hxwl-13-home-energy-price';
@@ -115,6 +125,27 @@ let showMappingConfig = false;
 let ignoredAnomalies = JSON.parse(localStorage.getItem(anomalyIgnoreKey) || '[]');
 let showIgnoredAnomalies = false;
 
+let backupRestoreState = {
+  step: 'welcome',
+  parsedBackup: null,
+  validatedBackup: null,
+  migratedBackup: null,
+  analysis: null,
+  currentData: null,
+  updateMode: 'update',
+  selectedTab: 'backup'
+};
+let backupRestoreOptions = {
+  includeRecords: true,
+  includeAppliances: true,
+  includeMembers: true,
+  includePriceSettings: true,
+  includeGoalSettings: true,
+  includeTariffs: true,
+  includeSlotMapping: true,
+  includeIgnoredAnomalies: true
+};
+
 document.querySelector('#app').innerHTML = `
   <div id="toastContainer" class="toastContainer"></div>
   <main class="shell">
@@ -123,7 +154,10 @@ document.querySelector('#app').innerHTML = `
         <p>hxwl-13 · port 5113</p>
         <h1>家庭用电习惯观察</h1>
       </div>
-      <button id="sample">载入示例</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
+        <button id="backupRestoreBtn">💾 数据备份与恢复</button>
+        <button id="sample">载入示例</button>
+      </div>
     </header>
 
     <section class="panel energyGoalPanel" id="energyGoalSection">
@@ -2276,6 +2310,759 @@ function drawDonut(selector, data) {
            '<text x="285" y="' + (64 + index * 30) + '">' + item.label + ' ' + Math.round(item.value / total * 100) + '%</text>';
   }).join('');
   el.innerHTML = '<svg viewBox="0 0 500 220">' + rings + '<circle cx="135" cy="105" r="44" fill="white"/><text x="135" y="112">' + total.toFixed(1) + 'kWh</text>' + legend + '</svg>';
+}
+
+const backupRestoreBtn = document.querySelector('#backupRestoreBtn');
+const backupModalOverlay = document.querySelector('#backupModalOverlay');
+const backupRestoreModalEl = document.querySelector('#backupRestoreModal');
+
+const RESTORE_STEPS = ['selectFile', 'validate', 'migrate', 'diffPreview', 'confirm', 'complete'];
+
+function openBackupRestoreModal() {
+  backupRestoreState = {
+    step: 'welcome',
+    parsedBackup: null,
+    validatedBackup: null,
+    migratedBackup: null,
+    analysis: null,
+    currentData: getCurrentData(),
+    updateMode: 'skip',
+    selectedTab: 'backup',
+    restoreError: null
+  };
+  backupRestoreOptions = {
+    includeRecords: true,
+    includeAppliances: true,
+    includeMembers: true,
+    includePriceSettings: true,
+    includeGoalSettings: true,
+    includeTariffs: true,
+    includeSlotMapping: true,
+    includeIgnoredAnomalies: true
+  };
+  backupModalOverlay.style.display = 'block';
+  backupRestoreModalEl.style.display = 'block';
+  renderBackupRestoreModal();
+}
+
+function closeBackupRestoreModal() {
+  backupModalOverlay.style.display = 'none';
+  backupRestoreModalEl.style.display = 'none';
+  backupRestoreState.step = 'welcome';
+  backupRestoreState.parsedBackup = null;
+  backupRestoreState.validatedBackup = null;
+  backupRestoreState.migratedBackup = null;
+  backupRestoreState.analysis = null;
+  backupRestoreState.restoreError = null;
+}
+
+backupRestoreBtn.addEventListener('click', openBackupRestoreModal);
+backupModalOverlay.addEventListener('click', closeBackupRestoreModal);
+
+function renderBackupRestoreModal() {
+  const { selectedTab, step } = backupRestoreState;
+  const modal = backupRestoreModalEl;
+
+  const tabHtml = `
+    <div class="brTabs">
+      <button class="brTab ${selectedTab === 'backup' ? 'active' : ''}" data-br-tab="backup">📦 数据备份</button>
+      <button class="brTab ${selectedTab === 'restore' ? 'active' : ''}" data-br-tab="restore">📥 数据恢复</button>
+    </div>
+  `;
+
+  let bodyHtml = '';
+  let footerHtml = '';
+
+  if (selectedTab === 'backup') {
+    bodyHtml = renderBackupTab();
+    footerHtml = `
+      <button class="brBtn secondary" id="brCloseBtn">关闭</button>
+      <button class="brBtn primary" id="brExportBtn">💾 导出备份</button>
+    `;
+  } else {
+    const stepIdx = RESTORE_STEPS.indexOf(step);
+    bodyHtml = renderRestoreStepIndicator(stepIdx) + renderRestoreStep();
+
+    if (step === 'selectFile') {
+      footerHtml = `
+        <button class="brBtn secondary" id="brCloseBtn">关闭</button>
+      `;
+    } else if (step === 'validate') {
+      const vb = backupRestoreState.validatedBackup;
+      const canProceed = vb && vb.valid;
+      footerHtml = `
+        <button class="brBtn secondary" id="brRestoreBackBtn">上一步</button>
+        <button class="brBtn primary" id="brRestoreNextBtn" ${canProceed ? '' : 'disabled'}>下一步</button>
+      `;
+    } else if (step === 'migrate') {
+      footerHtml = `
+        <button class="brBtn secondary" id="brRestoreBackBtn">上一步</button>
+        <button class="brBtn primary" id="brRestoreNextBtn">下一步</button>
+      `;
+    } else if (step === 'diffPreview') {
+      footerHtml = `
+        <button class="brBtn secondary" id="brRestoreBackBtn">上一步</button>
+        <button class="brBtn primary" id="brRestoreNextBtn">下一步</button>
+      `;
+    } else if (step === 'confirm') {
+      footerHtml = `
+        <button class="brBtn secondary" id="brRestoreBackBtn">上一步</button>
+        <button class="brBtn danger" id="brApplyRestoreBtn">确认恢复</button>
+      `;
+    } else if (step === 'complete') {
+      footerHtml = `
+        <button class="brBtn primary" id="brCloseBtn">完成</button>
+      `;
+    }
+  }
+
+  modal.innerHTML = `
+    <div class="brHeader">
+      <h2>💾 数据备份与恢复中心</h2>
+      <button class="brCloseBtn" id="brHeaderCloseBtn">×</button>
+    </div>
+    ${tabHtml}
+    <div class="brBody">${bodyHtml}</div>
+    <div class="brFooter">${footerHtml}</div>
+  `;
+
+  bindBackupRestoreEvents();
+}
+
+function renderBackupTab() {
+  const currentData = backupRestoreState.currentData || getCurrentData();
+  const recordCount = (currentData.records || []).length;
+  const applianceCount = (currentData.appliances || []).length;
+  const memberCount = (currentData.members || []).length;
+  const tariffCount = (currentData.tariffs || []).length;
+
+  return `
+    <div class="brSection">
+      <h3 class="brSectionTitle">📋 选择备份内容</h3>
+      <div class="brCheckboxGroup">
+        ${renderCheckbox('includeRecords', '用电记录', `${recordCount} 条`)}
+        ${renderCheckbox('includeAppliances', '电器档案', `${applianceCount} 条`)}
+        ${renderCheckbox('includeMembers', '家庭成员', `${memberCount} 条`)}
+        ${renderCheckbox('includePriceSettings', '电价设置', '')}
+        ${renderCheckbox('includeGoalSettings', '节能目标', '')}
+        ${renderCheckbox('includeTariffs', '分时电价方案', `${tariffCount} 条`)}
+        ${renderCheckbox('includeSlotMapping', '时段映射规则', '')}
+        ${renderCheckbox('includeIgnoredAnomalies', '已忽略异常', '')}
+      </div>
+    </div>
+    <div class="brSection">
+      <h3 class="brSectionTitle">📊 当前数据概览</h3>
+      <div class="brDataSummary">
+        <div class="brDataStat"><span>用电记录</span><strong>${recordCount}</strong></div>
+        <div class="brDataStat"><span>电器档案</span><strong>${applianceCount}</strong></div>
+        <div class="brDataStat"><span>家庭成员</span><strong>${memberCount}</strong></div>
+        <div class="brDataStat"><span>电价方案</span><strong>${tariffCount}</strong></div>
+      </div>
+    </div>
+    <div class="brWarning">
+      <span class="brWarningIcon">⚠️</span>
+      <div>
+        <strong>备份说明</strong><br/>
+        导出的备份文件为 JSON 格式，包含所有选中的数据。请妥善保存备份文件，恢复时需要使用同一文件。
+        备份文件包含数据版本号，未来应用更新后会自动进行数据迁移。
+      </div>
+    </div>
+  `;
+}
+
+function renderCheckbox(key, label, countText) {
+  const checked = backupRestoreOptions[key] ? 'checked' : '';
+  return `
+    <div class="brCheckboxItem">
+      <input type="checkbox" id="brOpt_${key}" data-br-option="${key}" ${checked} />
+      <label for="brOpt_${key}">${label}${countText ? ` (${countText})` : ''}</label>
+    </div>
+  `;
+}
+
+function renderRestoreStepIndicator(currentStepIdx) {
+  const labels = ['选择文件', '验证', '迁移', '差异预览', '确认', '完成'];
+  let html = '<div class="brStepIndicator">';
+
+  for (let i = 0; i < labels.length; i++) {
+    const state = i < currentStepIdx ? 'done' : i === currentStepIdx ? 'active' : '';
+    const dotContent = i < currentStepIdx ? '✓' : String(i + 1);
+
+    html += `<div class="brStep ${state}">
+      <span class="brStepDot">${dotContent}</span>
+      <span>${labels[i]}</span>
+    </div>`;
+
+    if (i < labels.length - 1) {
+      html += `<span class="brStepLine ${i < currentStepIdx ? 'done' : ''}"></span>`;
+    }
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function renderRestoreStep() {
+  const { step, restoreError } = backupRestoreState;
+
+  if (restoreError) {
+    return `
+      <div class="brValidationItem error">
+        <span>🚨</span>
+        <span>${restoreError}</span>
+      </div>
+      <div style="margin-top: 16px; text-align: center;">
+        <button class="brBtn secondary" id="brRetryBtn">重新选择文件</button>
+      </div>
+    `;
+  }
+
+  switch (step) {
+    case 'selectFile':
+      return renderSelectFileStep();
+    case 'validate':
+      return renderValidateStep();
+    case 'migrate':
+      return renderMigrateStep();
+    case 'diffPreview':
+      return renderDiffPreviewStep();
+    case 'confirm':
+      return renderConfirmStep();
+    case 'complete':
+      return renderCompleteStep();
+    default:
+      return '';
+  }
+}
+
+function renderSelectFileStep() {
+  return `
+    <div class="brSection">
+      <div class="brDropZone" id="brDropZone">
+        <span class="brDropZoneIcon">📁</span>
+        <p>拖拽备份文件到此处</p>
+        <p>或点击选择文件</p>
+        <p class="hint">仅支持 .json 格式的备份文件</p>
+        <input type="file" id="brFileInput" accept=".json" style="display:none;" />
+      </div>
+    </div>
+    <div class="brWarning">
+      <span class="brWarningIcon">⚠️</span>
+      <div>
+        <strong>恢复说明</strong><br/>
+        恢复操作不会直接覆盖当前数据。系统会先分析备份与当前数据的差异，
+        您可以预览新增、更新和跳过的记录数量，确认后才执行恢复。
+        旧版本备份会自动迁移至当前版本。
+      </div>
+    </div>
+  `;
+}
+
+function renderValidateStep() {
+  const backup = backupRestoreState.parsedBackup;
+  const validation = backupRestoreState.validatedBackup;
+  if (!backup || !validation) return '';
+
+  const recordCount = (backup.data.records || []).length;
+  const applianceCount = (backup.data.appliances || []).length;
+  const memberCount = (backup.data.members || []).length;
+  const tariffCount = (backup.data.tariffs || []).length;
+
+  const versionBadge = backup.schemaVersion === BACKUP_SCHEMA_VERSION
+    ? `<span class="brVersionBadge current">v${backup.schemaVersion} (当前版本)</span>`
+    : `<span class="brVersionBadge outdated">v${backup.schemaVersion} (旧版本)</span>`;
+
+  let validationHtml = '';
+  if (validation.valid) {
+    validationHtml += `<div class="brValidationItem success"><span>✅</span><span>备份文件格式验证通过</span></div>`;
+  }
+  validation.errors.forEach(err => {
+    validationHtml += `<div class="brValidationItem error"><span>🚨</span><span>${err}</span></div>`;
+  });
+  validation.warnings.forEach(w => {
+    validationHtml += `<div class="brValidationItem warning"><span>⚠️</span><span>${w}</span></div>`;
+  });
+
+  return `
+    <div class="brSection">
+      <div class="brFileInfo">
+        <span class="brFileInfoIcon">📄</span>
+        <div class="brFileInfoDetails">
+          <h4>备份文件信息 ${versionBadge}</h4>
+          <p>导出时间：${backup.exportedAt ? new Date(backup.exportedAt).toLocaleString('zh-CN') : '未知'}</p>
+          <p>应用版本：${backup.appVersion || '未知'}</p>
+          <p>数据版本：v${backup.schemaVersion}</p>
+        </div>
+      </div>
+    </div>
+    <div class="brSection">
+      <h3 class="brSectionTitle">📊 备份数据概览</h3>
+      <div class="brDataSummary">
+        <div class="brDataStat"><span>用电记录</span><strong>${recordCount}</strong></div>
+        <div class="brDataStat"><span>电器档案</span><strong>${applianceCount}</strong></div>
+        <div class="brDataStat"><span>家庭成员</span><strong>${memberCount}</strong></div>
+        <div class="brDataStat"><span>电价方案</span><strong>${tariffCount}</strong></div>
+      </div>
+    </div>
+    <div class="brValidationResult">
+      <h3 class="brSectionTitle">🔍 验证结果</h3>
+      ${validationHtml}
+    </div>
+  `;
+}
+
+function renderMigrateStep() {
+  const backup = backupRestoreState.parsedBackup;
+  const migrated = backupRestoreState.migratedBackup;
+  if (!backup) return '';
+
+  const needsMigration = backup.schemaVersion < BACKUP_SCHEMA_VERSION;
+
+  if (!needsMigration) {
+    return `
+      <div class="brMigrationInfo">
+        <h4>✅ 无需迁移</h4>
+        <p>备份数据版本 (v${backup.schemaVersion}) 与当前应用版本一致，无需进行数据迁移。</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="brMigrationInfo">
+      <h4>🔄 数据迁移</h4>
+      <p>备份数据版本从 <span class="brVersionBadge outdated">v${backup.schemaVersion}</span> 迁移至 <span class="brVersionBadge current">v${BACKUP_SCHEMA_VERSION}</span></p>
+      <p>迁移步骤：${backup.schemaVersion + 1} → ${BACKUP_SCHEMA_VERSION}</p>
+      ${migrated ? '<p style="color: #16a34a; font-weight: 600; margin-top: 8px;">✅ 迁移已完成</p>' : ''}
+    </div>
+    <div class="brWarning" style="margin-top: 16px;">
+      <span class="brWarningIcon">ℹ️</span>
+      <div>
+        数据迁移会自动调整旧版本数据结构以适配当前应用版本。
+        迁移过程中不会丢失原有数据，仅补充新版本所需的字段或格式。
+      </div>
+    </div>
+  `;
+}
+
+function renderDiffPreviewStep() {
+  const analysis = backupRestoreState.analysis;
+  if (!analysis) return '';
+
+  let html = '';
+
+  html += renderDiffCategory('用电记录', 'records', analysis.records, ['date', 'appliance', 'slot']);
+  html += renderDiffCategory('电器档案', 'appliances', analysis.appliances, ['name', 'watts', 'slot']);
+  html += renderDiffCategory('家庭成员', 'members', analysis.members, ['name']);
+
+  if (analysis.tariffs.items && analysis.tariffs.items.length > 0) {
+    html += renderDiffCategory('电价方案', 'tariffs', analysis.tariffs, ['name']);
+  }
+
+  if (analysis.priceSettings.action !== 'none') {
+    html += `
+      <div class="brDiffCategory">
+        <div class="brDiffCategoryHeader">
+          <span class="brDiffCategoryTitle">💰 电价设置</span>
+          <span class="brDiffBadge update">将更新</span>
+        </div>
+      </div>
+    `;
+  }
+
+  if (analysis.goalSettings.action !== 'none') {
+    html += `
+      <div class="brDiffCategory">
+        <div class="brDiffCategoryHeader">
+          <span class="brDiffCategoryTitle">🎯 节能目标</span>
+          <span class="brDiffBadge update">将更新</span>
+        </div>
+      </div>
+    `;
+  }
+
+  if (analysis.slotMapping.different) {
+    html += `
+      <div class="brDiffCategory">
+        <div class="brDiffCategoryHeader">
+          <span class="brDiffCategoryTitle">🔗 时段映射</span>
+          <span class="brDiffBadge update">将更新</span>
+        </div>
+      </div>
+    `;
+  }
+
+  if (analysis.ignoredAnomalies.action === 'merge') {
+    html += `
+      <div class="brDiffCategory">
+        <div class="brDiffCategoryHeader">
+          <span class="brDiffCategoryTitle">🔕 已忽略异常</span>
+          <span class="brDiffBadge add">合并 ${analysis.ignoredAnomalies.count} 条</span>
+        </div>
+      </div>
+    `;
+  }
+
+  html += `
+    <div class="brUpdateMode">
+      <h3 class="brSectionTitle">⚙️ 冲突处理策略</h3>
+      <div class="brUpdateModeOptions">
+        <div class="brUpdateModeOption ${backupRestoreState.updateMode === 'skip' ? 'selected' : ''}" data-br-mode="skip">
+          <h4>跳过重复</h4>
+          <p>保留当前数据，跳过备份中已有的记录</p>
+        </div>
+        <div class="brUpdateModeOption ${backupRestoreState.updateMode === 'update' ? 'selected' : ''}" data-br-mode="update">
+          <h4>更新现有</h4>
+          <p>新增不存在的记录，更新已有记录为新值</p>
+        </div>
+      </div>
+    </div>
+  `;
+
+  return html;
+}
+
+function renderDiffCategory(title, key, diffData, summaryFields) {
+  if (!diffData || diffData.items.length === 0) {
+    if (!diffData) return '';
+    return `
+      <div class="brDiffCategory">
+        <div class="brDiffCategoryHeader">
+          <span class="brDiffCategoryTitle">${title}</span>
+          <span class="brDiffBadge skip">无变化</span>
+        </div>
+      </div>
+    `;
+  }
+
+  let badgesHtml = '';
+  if (diffData.added > 0) badgesHtml += `<span class="brDiffBadge add">+${diffData.added} 新增</span>`;
+  if (diffData.updated > 0) badgesHtml += `<span class="brDiffBadge update">~${diffData.updated} 更新</span>`;
+  if (diffData.skipped > 0) badgesHtml += `<span class="brDiffBadge skip">${diffData.skipped} 跳过</span>`;
+
+  let itemsHtml = '';
+  diffData.items.forEach(item => {
+    const typeClass = item.type === 'add' ? 'add' : item.type === 'update' ? 'update' : 'skip';
+    const typeLabel = item.type === 'add' ? '新增' : item.type === 'update' ? '更新' : '跳过';
+
+    let contentHtml = '';
+    if (item.type === 'add') {
+      const summary = summaryFields.map(f => item.imported[f]).filter(Boolean).join(' · ');
+      contentHtml = `<div class="brDiffItemContent">${summary}</div>`;
+    } else if (item.type === 'update' && item.differences) {
+      contentHtml = '<div class="brDiffItemContent">';
+      const summary = summaryFields.map(f => item.current[f]).filter(Boolean).join(' · ');
+      contentHtml += `<div style="margin-bottom:4px;">${summary}</div>`;
+      item.differences.forEach(diff => {
+        contentHtml += `<div class="brDiffFieldChange">
+          <span class="brDiffFieldLabel">${diff.field}</span>
+          <span class="brDiffOldVal">${diff.current !== null && diff.current !== undefined ? diff.current : '(空)'}</span>
+          <span class="brDiffArrow">→</span>
+          <span class="brDiffNewVal">${diff.imported !== null && diff.imported !== undefined ? diff.imported : '(空)'}</span>
+        </div>`;
+      });
+      contentHtml += '</div>';
+    } else if (item.type === 'skip') {
+      const summary = summaryFields.map(f => item.current[f]).filter(Boolean).join(' · ');
+      contentHtml = `<div class="brDiffItemContent" style="color:#6b7280;">${summary}</div>`;
+    }
+
+    itemsHtml += `
+      <div class="brDiffItem">
+        <span class="brDiffItemType ${typeClass}">${typeLabel}</span>
+        ${contentHtml}
+      </div>
+    `;
+  });
+
+  return `
+    <div class="brDiffCategory">
+      <div class="brDiffCategoryHeader" data-br-toggle="${key}">
+        <span class="brDiffCategoryTitle">${title}</span>
+        <div class="brDiffBadges">${badgesHtml}</div>
+      </div>
+      <div class="brDiffItems" id="brDiffItems_${key}">
+        ${itemsHtml}
+      </div>
+    </div>
+  `;
+}
+
+function renderConfirmStep() {
+  const analysis = backupRestoreState.analysis;
+  if (!analysis) return '';
+
+  const mode = backupRestoreState.updateMode;
+  const modeLabel = mode === 'skip' ? '跳过重复' : '更新现有';
+
+  let totalAdded = 0, totalUpdated = 0, totalSkipped = 0;
+  ['records', 'appliances', 'members', 'tariffs'].forEach(key => {
+    if (analysis[key]) {
+      totalAdded += analysis[key].added;
+      if (mode !== 'skip') {
+        totalUpdated += analysis[key].updated;
+      } else {
+        totalSkipped += analysis[key].updated;
+      }
+      totalSkipped += analysis[key].skipped;
+    }
+  });
+
+  return `
+    <div class="brWarning">
+      <span class="brWarningIcon">⚠️</span>
+      <div>
+        <strong>即将执行数据恢复</strong><br/>
+        当前冲突策略：${modeLabel}。恢复操作将修改本地存储数据，请确认以下操作明细。
+      </div>
+    </div>
+    <div class="brConfirmSummary">
+      <div class="brConfirmStat addStat"><span>新增记录</span><strong>${totalAdded}</strong></div>
+      <div class="brConfirmStat updateStat"><span>${mode !== 'skip' ? '更新记录' : '跳过(冲突)'}</span><strong>${totalUpdated}</strong></div>
+      <div class="brConfirmStat skipStat"><span>跳过记录</span><strong>${totalSkipped}</strong></div>
+    </div>
+    <div class="brSection" style="margin-top: 16px;">
+      <h3 class="brSectionTitle">📋 操作明细</h3>
+      ${analysis.records ? `<p style="font-size:14px; margin:6px 0;">用电记录：新增 ${analysis.records.added} 条 / 更新 ${analysis.records.updated} 条 / 跳过 ${analysis.records.skipped} 条</p>` : ''}
+      ${analysis.appliances ? `<p style="font-size:14px; margin:6px 0;">电器档案：新增 ${analysis.appliances.added} 条 / 更新 ${analysis.appliances.updated} 条 / 跳过 ${analysis.appliances.skipped} 条</p>` : ''}
+      ${analysis.members ? `<p style="font-size:14px; margin:6px 0;">家庭成员：新增 ${analysis.members.added} 条 / 更新 ${analysis.members.updated} 条 / 跳过 ${analysis.members.skipped} 条</p>` : ''}
+      ${analysis.tariffs ? `<p style="font-size:14px; margin:6px 0;">电价方案：新增 ${analysis.tariffs.added} 条 / 更新 ${analysis.tariffs.updated} 条 / 跳过 ${analysis.tariffs.skipped} 条</p>` : ''}
+      ${analysis.priceSettings.action !== 'none' ? '<p style="font-size:14px; margin:6px 0;">电价设置：将更新</p>' : ''}
+      ${analysis.goalSettings.action !== 'none' ? '<p style="font-size:14px; margin:6px 0;">节能目标：将更新</p>' : ''}
+      ${analysis.slotMapping.different ? '<p style="font-size:14px; margin:6px 0;">时段映射：将更新</p>' : ''}
+      ${analysis.ignoredAnomalies.action === 'merge' ? `<p style="font-size:14px; margin:6px 0;">已忽略异常：合并 ${analysis.ignoredAnomalies.count} 条</p>` : ''}
+    </div>
+  `;
+}
+
+function renderCompleteStep() {
+  const analysis = backupRestoreState.analysis;
+  const mode = backupRestoreState.updateMode;
+
+  let totalAdded = 0, totalUpdated = 0, totalSkipped = 0;
+  if (analysis) {
+    ['records', 'appliances', 'members', 'tariffs'].forEach(key => {
+      if (analysis[key]) {
+        totalAdded += analysis[key].added;
+        if (mode !== 'skip') {
+          totalUpdated += analysis[key].updated;
+        }
+        totalSkipped += analysis[key].skipped;
+      }
+    });
+  }
+
+  return `
+    <div class="brSuccessResult">
+      <span class="brSuccessIcon">✅</span>
+      <h3>数据恢复完成</h3>
+      <p>新增 ${totalAdded} 条记录</p>
+      <p>${mode !== 'skip' ? '更新' + totalUpdated + ' 条记录' : '跳过 ' + totalUpdated + ' 条冲突记录'}</p>
+      <p>跳过 ${totalSkipped} 条相同记录</p>
+    </div>
+  `;
+}
+
+function bindBackupRestoreEvents() {
+  const closeBtn = document.querySelector('#brCloseBtn');
+  const headerCloseBtn = document.querySelector('#brHeaderCloseBtn');
+  if (closeBtn) closeBtn.addEventListener('click', closeBackupRestoreModal);
+  if (headerCloseBtn) headerCloseBtn.addEventListener('click', closeBackupRestoreModal);
+
+  document.querySelectorAll('[data-br-tab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      backupRestoreState.selectedTab = tab.dataset.brTab;
+      if (tab.dataset.brTab === 'restore') {
+        backupRestoreState.step = 'selectFile';
+        backupRestoreState.restoreError = null;
+      }
+      renderBackupRestoreModal();
+    });
+  });
+
+  document.querySelectorAll('[data-br-option]').forEach(checkbox => {
+    checkbox.addEventListener('change', (e) => {
+      backupRestoreOptions[e.target.dataset.brOption] = e.target.checked;
+    });
+  });
+
+  const exportBtn = document.querySelector('#brExportBtn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', () => {
+      const opts = { ...backupRestoreOptions };
+      exportBackup(null, opts);
+      showToast('success', '备份已导出', '数据备份文件已开始下载');
+      closeBackupRestoreModal();
+    });
+  }
+
+  const dropZone = document.querySelector('#brDropZone');
+  const fileInput = document.querySelector('#brFileInput');
+
+  if (dropZone && fileInput) {
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('dragOver');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('dragOver');
+      });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      const file = e.dataTransfer.files[0];
+      if (file) handleRestoreFile(file);
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) handleRestoreFile(file);
+    });
+  }
+
+  const retryBtn = document.querySelector('#brRetryBtn');
+  if (retryBtn) {
+    retryBtn.addEventListener('click', () => {
+      backupRestoreState.step = 'selectFile';
+      backupRestoreState.restoreError = null;
+      renderBackupRestoreModal();
+    });
+  }
+
+  const backBtn = document.querySelector('#brRestoreBackBtn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      const currentIdx = RESTORE_STEPS.indexOf(backupRestoreState.step);
+      if (currentIdx > 0) {
+        backupRestoreState.step = RESTORE_STEPS[currentIdx - 1];
+        renderBackupRestoreModal();
+      }
+    });
+  }
+
+  const nextBtn = document.querySelector('#brRestoreNextBtn');
+  if (nextBtn) {
+    nextBtn.addEventListener('click', () => {
+      handleRestoreNextStep();
+    });
+  }
+
+  const applyBtn = document.querySelector('#brApplyRestoreBtn');
+  if (applyBtn) {
+    applyBtn.addEventListener('click', () => {
+      handleApplyRestore();
+    });
+  }
+
+  document.querySelectorAll('[data-br-mode]').forEach(option => {
+    option.addEventListener('click', () => {
+      backupRestoreState.updateMode = option.dataset.brMode;
+      const migratedData = backupRestoreState.migratedBackup
+        ? backupRestoreState.migratedBackup.data
+        : backupRestoreState.parsedBackup.data;
+      backupRestoreState.analysis = analyzeDifferences(getCurrentData(), migratedData);
+      renderBackupRestoreModal();
+    });
+  });
+
+  document.querySelectorAll('[data-br-toggle]').forEach(header => {
+    header.addEventListener('click', () => {
+      const key = header.dataset.brToggle;
+      const items = document.querySelector(`#brDiffItems_${key}`);
+      if (items) {
+        items.classList.toggle('expanded');
+      }
+    });
+  });
+}
+
+async function handleRestoreFile(file) {
+  try {
+    const backup = await parseBackupFile(file);
+    backupRestoreState.parsedBackup = backup;
+    backupRestoreState.restoreError = null;
+
+    const validation = validateBackup(backup);
+    backupRestoreState.validatedBackup = validation;
+
+    if (!validation.valid) {
+      backupRestoreState.restoreError = validation.errors.join('；');
+      renderBackupRestoreModal();
+      return;
+    }
+
+    backupRestoreState.step = 'validate';
+    renderBackupRestoreModal();
+  } catch (err) {
+    backupRestoreState.restoreError = err.message;
+    renderBackupRestoreModal();
+  }
+}
+
+function handleRestoreNextStep() {
+  const { step, parsedBackup } = backupRestoreState;
+
+  if (step === 'validate') {
+    try {
+      const migrated = migrateBackup(parsedBackup);
+      backupRestoreState.migratedBackup = migrated;
+      backupRestoreState.step = 'migrate';
+      renderBackupRestoreModal();
+    } catch (err) {
+      backupRestoreState.restoreError = err.message;
+      renderBackupRestoreModal();
+    }
+  } else if (step === 'migrate') {
+    const migratedData = backupRestoreState.migratedBackup
+      ? backupRestoreState.migratedBackup.data
+      : backupRestoreState.parsedBackup.data;
+    backupRestoreState.analysis = analyzeDifferences(getCurrentData(), migratedData);
+    backupRestoreState.step = 'diffPreview';
+    renderBackupRestoreModal();
+  } else if (step === 'diffPreview') {
+    backupRestoreState.step = 'confirm';
+    renderBackupRestoreModal();
+  }
+}
+
+function handleApplyRestore() {
+  const { analysis, updateMode, migratedBackup, parsedBackup } = backupRestoreState;
+
+  const importedData = (migratedBackup ? migratedBackup.data : parsedBackup.data) || {};
+
+  const opts = {
+    ...backupRestoreOptions,
+    updateMode
+  };
+
+  try {
+    applyRestore(analysis, importedData, opts);
+
+    records = normalizeRecords(JSON.parse(localStorage.getItem(key) || 'null') || seed);
+    appliances = JSON.parse(localStorage.getItem(applianceKey) || 'null') || applianceSeed;
+    members = JSON.parse(localStorage.getItem(memberKey) || 'null') || memberSeed;
+    priceSettings = JSON.parse(localStorage.getItem(priceKey) || 'null') || { price: 0.56, month: new Date().toISOString().slice(0, 7) };
+    goalSettings = JSON.parse(localStorage.getItem(goalKey) || 'null') || null;
+    tariffs = JSON.parse(localStorage.getItem(tariffKey) || 'null') || tariffSeed;
+    slotMapping = JSON.parse(localStorage.getItem(slotMappingKey) || 'null') || slotMappingSeed;
+    ignoredAnomalies = JSON.parse(localStorage.getItem(anomalyIgnoreKey) || '[]');
+
+    backupRestoreState.step = 'complete';
+    renderBackupRestoreModal();
+    render();
+    showToast('success', '恢复完成', '数据已成功从备份恢复');
+  } catch (err) {
+    backupRestoreState.restoreError = '恢复失败：' + err.message;
+    renderBackupRestoreModal();
+  }
 }
 
 render();
