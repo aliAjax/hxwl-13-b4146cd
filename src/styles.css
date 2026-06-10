@@ -2161,3 +2161,197 @@ td button { margin-left: 6px; background: #e4ecff; }
     flex-wrap: wrap;
   }
 }
+
+.filterBar {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+  padding: 16px;
+  background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%);
+  border: 1px solid #d5deee;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.filterItem {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+  flex: 1;
+}
+
+.filterItem label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #5c6982;
+}
+
+.filterItem select {
+  margin: 0;
+}
+
+.filterResetBtn {
+  padding: 11px 20px;
+  border: 0;
+  border-radius: 6px;
+  background: #e4ecff;
+  color: #2563eb;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.filterResetBtn:hover {
+  background: #d4dfff;
+}
+
+.filterResultBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #f8faff;
+  border: 1px solid #e0e7f5;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.filterResultText {
+  font-size: 13px;
+  color: #5c6982;
+}
+
+.filterResultText strong {
+  color: #2563eb;
+  font-weight: 600;
+  margin: 0 2px;
+}
+
+.filterActiveTags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.filterTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 4px 10px;
+  background: #e8efff;
+  color: #2563eb;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.filterTagLabel {
+  color: #64748b;
+}
+
+.filterTagValue {
+  font-weight: 600;
+}
+
+.filterTagClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+  transition: all 0.2s;
+}
+
+.filterTagClose:hover {
+  background: #2563eb;
+  color: white;
+}
+
+.emptyState {
+  text-align: center;
+  padding: 60px 20px;
+  color: #5c6982;
+  background: #f8faff;
+  border: 2px dashed #c7d2fe;
+  border-radius: 12px;
+  margin: 20px 0;
+}
+
+.emptyStateIcon {
+  font-size: 56px;
+  display: block;
+  margin-bottom: 16px;
+}
+
+.emptyStateTitle {
+  font-size: 18px;
+  font-weight: 600;
+  color: #172033;
+  margin: 0 0 8px 0;
+}
+
+.emptyStateHint {
+  font-size: 14px;
+  color: #8b95a8;
+  margin: 0 0 20px 0;
+}
+
+.emptyStateFilters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.emptyFilterTag {
+  display: inline-block;
+  padding: 4px 12px;
+  background: #e0e7ff;
+  color: #4338ca;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+@media (max-width: 900px) {
+  .filterBar {
+    padding: 12px;
+  }
+
+  .filterItem {
+    min-width: calc(50% - 6px);
+  }
+
+  .filterResetBtn {
+    width: 100%;
+  }
+
+  .filterResultBar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .filterActiveTags {
+    width: 100%;
+  }
+
+  .emptyState {
+    padding: 40px 16px;
+  }
+}

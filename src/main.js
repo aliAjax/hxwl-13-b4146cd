@@ -615,7 +615,49 @@ document.querySelector('#app').innerHTML = `
           <input id="search" placeholder="搜索电器或备注" />
         </div>
       </div>
+      <div class="filterBar" id="filterBar">
+        <div class="filterItem">
+          <label>月份</label>
+          <select id="filterMonth">
+            <option value="">全部月份</option>
+          </select>
+        </div>
+        <div class="filterItem">
+          <label>成员</label>
+          <select id="filterMember">
+            <option value="">全部成员</option>
+          </select>
+        </div>
+        <div class="filterItem">
+          <label>时段</label>
+          <select id="filterSlot">
+            <option value="">全部时段</option>
+            <option>清晨</option><option>上午</option><option>午间</option><option>午后</option><option>傍晚</option><option>晚间</option><option>深夜</option><option>全天</option>
+          </select>
+        </div>
+        <div class="filterItem">
+          <label>电器</label>
+          <select id="filterAppliance">
+            <option value="">全部电器</option>
+          </select>
+        </div>
+        <button id="resetFilters" class="filterResetBtn">重置筛选</button>
+      </div>
+      <div class="filterResultBar" id="filterResultBar">
+        <span class="filterResultText">
+          共找到 <strong id="filterResultCount">0</strong> 条记录，
+          总耗电 <strong id="filterResultTotal">0</strong> kWh
+        </span>
+        <span class="filterActiveTags" id="filterActiveTags"></span>
+      </div>
       <div class="tableWrap"><table><thead><tr><th id="selectAllHeader" style="display:none;"><input type="checkbox" id="selectAllCheckbox" /></th><th>日期</th><th>电器</th><th>成员</th><th>时段</th><th>耗电</th><th>备注</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+      <div id="emptyState" class="emptyState" style="display:none;">
+        <span class="emptyStateIcon">🔍</span>
+        <p class="emptyStateTitle">没有找到匹配的记录</p>
+        <p class="emptyStateHint">试试调整筛选条件，或清除筛选查看全部记录</p>
+        <div class="emptyStateFilters" id="emptyStateFilters"></div>
+        <button id="emptyResetBtn" class="filterResetBtn">清除所有筛选</button>
+      </div>
     </section>
   </main>
 `;
@@ -647,6 +689,19 @@ const confirmBatchAssignBtn = document.querySelector('#confirmBatchAssignBtn');
 const selectAllHeader = document.querySelector('#selectAllHeader');
 const selectAllCheckbox = document.querySelector('#selectAllCheckbox');
 const selectedCountSpan = document.querySelector('#selectedCount');
+
+const filterMonth = document.querySelector('#filterMonth');
+const filterMember = document.querySelector('#filterMember');
+const filterSlot = document.querySelector('#filterSlot');
+const filterAppliance = document.querySelector('#filterAppliance');
+const resetFiltersBtn = document.querySelector('#resetFilters');
+const emptyState = document.querySelector('#emptyState');
+const filterResultBar = document.querySelector('#filterResultBar');
+const filterResultCount = document.querySelector('#filterResultCount');
+const filterResultTotal = document.querySelector('#filterResultTotal');
+const filterActiveTags = document.querySelector('#filterActiveTags');
+const emptyStateFilters = document.querySelector('#emptyStateFilters');
+const emptyResetBtn = document.querySelector('#emptyResetBtn');
 
 const tariffForm = document.querySelector('#tariffForm');
 const tariffFormContainer = document.querySelector('#tariffFormContainer');
@@ -815,7 +870,7 @@ confirmBatchAssignBtn.addEventListener('click', () => {
 });
 
 selectAllCheckbox.addEventListener('change', (e) => {
-  const filtered = records.filter((record) => [record.date, record.appliance, record.note, record.slot].join(' ').includes(search.value.trim()));
+  const filtered = getFilteredRecords();
   if (e.target.checked) {
     selectedRecordIds = filtered.map(r => r.id);
   } else {
@@ -825,6 +880,21 @@ selectAllCheckbox.addEventListener('change', (e) => {
 });
 
 search.addEventListener('input', render);
+filterMonth.addEventListener('change', render);
+filterMember.addEventListener('change', render);
+filterSlot.addEventListener('change', render);
+filterAppliance.addEventListener('change', render);
+function resetAllFilters() {
+  search.value = '';
+  filterMonth.value = '';
+  filterMember.value = '';
+  filterSlot.value = '';
+  filterAppliance.value = '';
+  render();
+}
+
+resetFiltersBtn.addEventListener('click', resetAllFilters);
+emptyResetBtn.addEventListener('click', resetAllFilters);
 document.querySelector('#sample').addEventListener('click', () => {
   const beforeTotal = getCurrentMonthTotal();
   records = seed;
@@ -2826,8 +2896,63 @@ function renderMemberStats() {
   }).join('');
 }
 
+function getFilteredRecords() {
+  const searchValue = search.value.trim();
+  const monthValue = filterMonth.value;
+  const memberValue = filterMember.value;
+  const slotValue = filterSlot.value;
+  const applianceValue = filterAppliance.value;
+
+  return records.filter(function(record) {
+    if (searchValue && ![record.date, record.appliance, record.note, record.slot, getMemberName(record)].join(' ').includes(searchValue)) {
+      return false;
+    }
+    if (monthValue && !record.date.startsWith(monthValue)) {
+      return false;
+    }
+    if (memberValue) {
+      const recordMember = getMemberName(record);
+      if (memberValue === UNASSIGNED_LABEL) {
+        if (recordMember !== UNASSIGNED_LABEL) return false;
+      } else {
+        if (recordMember !== memberValue) return false;
+      }
+    }
+    if (slotValue && record.slot !== slotValue) {
+      return false;
+    }
+    if (applianceValue && record.appliance !== applianceValue) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function updateFilterOptions() {
+  const months = [...new Set(records.map(r => r.date.slice(0, 7)))].sort().reverse();
+  const currentMonthValue = filterMonth.value;
+  filterMonth.innerHTML = '<option value="">全部月份</option>' +
+    months.map(m => `<option value="${m}" ${m === currentMonthValue ? 'selected' : ''}>${m}</option>`).join('');
+
+  const memberNames = [...members.map(m => m.name), UNASSIGNED_LABEL];
+  const currentMemberValue = filterMember.value;
+  filterMember.innerHTML = '<option value="">全部成员</option>' +
+    memberNames.map(m => `<option value="${m}" ${m === currentMemberValue ? 'selected' : ''}>${m}</option>`).join('');
+
+  const applianceNames = [...new Set(records.map(r => r.appliance))].sort();
+  const currentApplianceValue = filterAppliance.value;
+  filterAppliance.innerHTML = '<option value="">全部电器</option>' +
+    applianceNames.map(a => `<option value="${a}" ${a === currentApplianceValue ? 'selected' : ''}>${a}</option>`).join('');
+
+  const currentSlotValue = filterSlot.value;
+  const slotOptions = ['清晨', '上午', '午间', '午后', '傍晚', '晚间', '深夜', '全天'];
+  filterSlot.innerHTML = '<option value="">全部时段</option>' +
+    slotOptions.map(s => `<option value="${s}" ${s === currentSlotValue ? 'selected' : ''}>${s}</option>`).join('');
+}
+
 function render() {
-  const filtered = records.filter(function(record) { return [record.date, record.appliance, record.note, record.slot, getMemberName(record)].join(' ').includes(search.value.trim()); });
+  updateFilterOptions();
+  const filtered = getFilteredRecords();
   const total = records.reduce(function(sum, record) { return sum + kwh(record); }, 0);
   document.querySelector('#summary').innerHTML = [
     ['总估算耗电', total.toFixed(2) + 'kWh'],
@@ -2863,28 +2988,66 @@ function render() {
   const allSelected = filtered.length > 0 && filtered.every(function(r) { return selectedRecordIds.includes(r.id); });
   selectAllCheckbox.checked = allSelected;
 
-  document.querySelector('#rows').innerHTML = filtered.sort(function(a, b) { return b.date.localeCompare(a.date); }).map(function(record) {
-    const isChecked = selectedRecordIds.includes(record.id);
-    const memberName = getMemberName(record);
-    const memberLabel = memberName === UNASSIGNED_LABEL
-      ? '<span class="unassignedMember">' + UNASSIGNED_LABEL + '</span>'
-      : memberName;
+  const filteredTotal = filtered.reduce(function(sum, record) { return sum + kwh(record); }, 0);
+  filterResultCount.textContent = filtered.length;
+  filterResultTotal.textContent = filteredTotal.toFixed(2);
 
-    let rowHtml = '<tr data-record-id="' + record.id + '">';
-    if (batchAssignMode) {
-      rowHtml += '<td><input type="checkbox" class="recordCheckbox" data-id="' + record.id + '" ' + (isChecked ? 'checked' : '') + ' /></td>';
-    }
-    rowHtml += 
-      '<td>' + record.date + '</td>' +
-      '<td>' + record.appliance + '</td>' +
-      '<td>' + memberLabel + '</td>' +
-      '<td>' + record.slot + '</td>' +
-      '<td>' + kwh(record).toFixed(2) + 'kWh</td>' +
-      '<td>' + (record.note || '') + '</td>' +
-      '<td><button data-edit="' + record.id + '">编辑</button><button data-del="' + record.id + '">删除</button></td>' +
-    '</tr>';
-    return rowHtml;
+  const activeFilters = [];
+  if (search.value.trim()) activeFilters.push({ label: '关键词', value: search.value.trim(), type: 'search' });
+  if (filterMonth.value) activeFilters.push({ label: '月份', value: filterMonth.value, type: 'month' });
+  if (filterMember.value) activeFilters.push({ label: '成员', value: filterMember.value, type: 'member' });
+  if (filterSlot.value) activeFilters.push({ label: '时段', value: filterSlot.value, type: 'slot' });
+  if (filterAppliance.value) activeFilters.push({ label: '电器', value: filterAppliance.value, type: 'appliance' });
+
+  if (activeFilters.length > 0) {
+    filterActiveTags.innerHTML = activeFilters.map(function(f) {
+      return '<span class="filterTag" data-type="' + f.type + '">' +
+        '<span class="filterTagLabel">' + f.label + ':</span>' +
+        '<span class="filterTagValue">' + f.value + '</span>' +
+        '<button class="filterTagClose" data-type="' + f.type + '" aria-label="清除筛选">×</button>' +
+      '</span>';
+    }).join('');
+    filterActiveTags.style.display = 'flex';
+  } else {
+    filterActiveTags.innerHTML = '';
+    filterActiveTags.style.display = 'none';
+  }
+
+  emptyStateFilters.innerHTML = activeFilters.map(function(f) {
+    return '<span class="emptyFilterTag">' + f.label + ': ' + f.value + '</span>';
   }).join('');
+
+  const tableWrap = document.querySelector('#rows').closest('.tableWrap');
+  if (filtered.length === 0) {
+    tableWrap.style.display = 'none';
+    emptyState.style.display = 'block';
+  } else {
+    tableWrap.style.display = 'block';
+    emptyState.style.display = 'none';
+
+    document.querySelector('#rows').innerHTML = filtered.sort(function(a, b) { return b.date.localeCompare(a.date); }).map(function(record) {
+      const isChecked = selectedRecordIds.includes(record.id);
+      const memberName = getMemberName(record);
+      const memberLabel = memberName === UNASSIGNED_LABEL
+        ? '<span class="unassignedMember">' + UNASSIGNED_LABEL + '</span>'
+        : memberName;
+
+      let rowHtml = '<tr data-record-id="' + record.id + '">';
+      if (batchAssignMode) {
+        rowHtml += '<td><input type="checkbox" class="recordCheckbox" data-id="' + record.id + '" ' + (isChecked ? 'checked' : '') + ' /></td>';
+      }
+      rowHtml += 
+        '<td>' + record.date + '</td>' +
+        '<td>' + record.appliance + '</td>' +
+        '<td>' + memberLabel + '</td>' +
+        '<td>' + record.slot + '</td>' +
+        '<td>' + kwh(record).toFixed(2) + 'kWh</td>' +
+        '<td>' + (record.note || '') + '</td>' +
+        '<td><button data-edit="' + record.id + '">编辑</button><button data-del="' + record.id + '">删除</button></td>' +
+      '</tr>';
+      return rowHtml;
+    }).join('');
+  }
 
   document.querySelectorAll('.recordCheckbox').forEach((checkbox) => {
     checkbox.addEventListener('change', (e) => {
@@ -2895,6 +3058,24 @@ function render() {
         }
       } else {
         selectedRecordIds = selectedRecordIds.filter(id => id !== recordId);
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll('.filterTagClose').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const type = e.currentTarget.dataset.type;
+      if (type === 'search') {
+        search.value = '';
+      } else if (type === 'month') {
+        filterMonth.value = '';
+      } else if (type === 'member') {
+        filterMember.value = '';
+      } else if (type === 'slot') {
+        filterSlot.value = '';
+      } else if (type === 'appliance') {
+        filterAppliance.value = '';
       }
       render();
     });
