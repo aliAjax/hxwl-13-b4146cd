@@ -6,8 +6,7 @@ import {
   migrateBackup,
   analyzeDifferences,
   applyRestore,
-  validateBackup,
-  getCurrentData
+  validateBackup
 } from './dataBackupService.js';
 
 const key = 'hxwl-13-home-energy';
@@ -145,6 +144,19 @@ let backupRestoreOptions = {
   includeSlotMapping: true,
   includeIgnoredAnomalies: true
 };
+
+function getBackupSourceData() {
+  return {
+    records,
+    appliances,
+    members,
+    priceSettings,
+    goalSettings,
+    tariffs,
+    slotMapping,
+    ignoredAnomalies
+  };
+}
 
 document.querySelector('#app').innerHTML = `
   <div id="toastContainer" class="toastContainer"></div>
@@ -2325,7 +2337,7 @@ function openBackupRestoreModal() {
     validatedBackup: null,
     migratedBackup: null,
     analysis: null,
-    currentData: getCurrentData(),
+    currentData: getBackupSourceData(),
     updateMode: 'skip',
     selectedTab: 'backup',
     restoreError: null
@@ -2430,7 +2442,7 @@ function renderBackupRestoreModal() {
 }
 
 function renderBackupTab() {
-  const currentData = backupRestoreState.currentData || getCurrentData();
+  const currentData = backupRestoreState.currentData || getBackupSourceData();
   const recordCount = (currentData.records || []).length;
   const applianceCount = (currentData.appliances || []).length;
   const memberCount = (currentData.members || []).length;
@@ -2889,7 +2901,7 @@ function bindBackupRestoreEvents() {
   if (exportBtn) {
     exportBtn.addEventListener('click', () => {
       const opts = { ...backupRestoreOptions };
-      exportBackup(null, opts);
+      exportBackup(null, opts, getBackupSourceData());
       showToast('success', '备份已导出', '数据备份文件已开始下载');
       closeBackupRestoreModal();
     });
@@ -2968,7 +2980,7 @@ function bindBackupRestoreEvents() {
       const migratedData = backupRestoreState.migratedBackup
         ? backupRestoreState.migratedBackup.data
         : backupRestoreState.parsedBackup.data;
-      backupRestoreState.analysis = analyzeDifferences(getCurrentData(), migratedData);
+      backupRestoreState.analysis = analyzeDifferences(getBackupSourceData(), migratedData);
       renderBackupRestoreModal();
     });
   });
@@ -3024,7 +3036,7 @@ function handleRestoreNextStep() {
     const migratedData = backupRestoreState.migratedBackup
       ? backupRestoreState.migratedBackup.data
       : backupRestoreState.parsedBackup.data;
-    backupRestoreState.analysis = analyzeDifferences(getCurrentData(), migratedData);
+    backupRestoreState.analysis = analyzeDifferences(getBackupSourceData(), migratedData);
     backupRestoreState.step = 'diffPreview';
     renderBackupRestoreModal();
   } else if (step === 'diffPreview') {

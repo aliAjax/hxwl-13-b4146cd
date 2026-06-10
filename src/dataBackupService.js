@@ -71,7 +71,7 @@ function getCurrentData() {
   return data;
 }
 
-function createBackup(options = {}) {
+function createBackup(options = {}, sourceData = null) {
   const {
     includeRecords = true,
     includeAppliances = true,
@@ -83,7 +83,7 @@ function createBackup(options = {}) {
     includeIgnoredAnomalies = true
   } = options;
 
-  const allData = getCurrentData();
+  const allData = sourceData || getCurrentData();
   const filteredData = {};
 
   if (includeRecords) filteredData.records = allData.records ?? [];
@@ -104,8 +104,8 @@ function createBackup(options = {}) {
   return backup;
 }
 
-function exportBackup(filename = null, options = {}) {
-  const backup = createBackup(options);
+function exportBackup(filename = null, options = {}, sourceData = null) {
+  const backup = createBackup(options, sourceData);
   const jsonStr = JSON.stringify(backup, null, 2);
   const blob = new Blob([jsonStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
