@@ -178,13 +178,29 @@ let showAnomalyRulesConfig = false;
 
 function migrateIgnoredAnomalies() {
   if (ignoredAnomalies.length === 0) return;
-  const needsMigration = ignoredAnomalies.some(item => typeof item === 'string');
-  if (!needsMigration) return;
-  const migrated = ignoredAnomalies.map(id => ({
-    id,
-    ignoredAt: Date.now(),
-    ruleSnapshot: JSON.parse(JSON.stringify(anomalyRules))
-  }));
+
+  const isStringItem = ignoredAnomalies.some(item => typeof item === 'string');
+  const missingStatus = ignoredAnomalies.some(item => typeof item === 'object' && item.status === undefined);
+
+  if (!isStringItem && !missingStatus) return;
+
+  const migrated = ignoredAnomalies.map(item => {
+    if (typeof item === 'string') {
+      return {
+        id: item,
+        status: 'active',
+        ignoredAt: Date.now(),
+        ruleSnapshot: JSON.parse(JSON.stringify(anomalyRules))
+      };
+    } else if (item.status === undefined) {
+      return {
+        ...item,
+        status: 'active'
+      };
+    }
+    return item;
+  });
+
   ignoredAnomalies = migrated;
   localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
 }
@@ -1709,7 +1725,7 @@ function getAnomalyId(type, recordId, date) {
 }
 
 function isAnomalyIgnored(anomalyId) {
-  return ignoredAnomalies.some(item => item.id === anomalyId);
+  return ignoredAnomalies.some(item => item.id === anomalyId && item.status === 'active');
 }
 
 function getIgnoredAnomalyRecord(anomalyId) {
@@ -1717,14 +1733,22 @@ function getIgnoredAnomalyRecord(anomalyId) {
 }
 
 function ignoreAnomaly(anomalyId) {
-  if (!isAnomalyIgnored(anomalyId)) {
+  const existing = getIgnoredAnomalyRecord(anomalyId);
+  if (existing) {
+    existing.status = 'active';
+    existing.ignoredAt = Date.now();
+    existing.ruleSnapshot = JSON.parse(JSON.stringify(anomalyRules));
+    delete existing.reevaluatedAt;
+    delete existing.newRuleSnapshot;
+  } else {
     ignoredAnomalies.push({
       id: anomalyId,
+      status: 'active',
       ignoredAt: Date.now(),
       ruleSnapshot: JSON.parse(JSON.stringify(anomalyRules))
     });
-    localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
   }
+  localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
 }
 
 function unignoreAnomaly(anomalyId) {
@@ -1744,16 +1768,21 @@ function haveRulesChanged(oldRules, newRules) {
 
 function reevaluateIgnoredAnomalies(oldRules) {
   if (!oldRules || !haveRulesChanged(oldRules, anomalyRules)) return 0;
-  const beforeCount = ignoredAnomalies.length;
-  const toRemove = [];
+  let reevaluatedCount = 0;
   ignoredAnomalies.forEach(item => {
+    if (item.status !== 'active') return;
     const itemRules = item.ruleSnapshot || oldRules;
     if (haveRulesChanged(itemRules, anomalyRules)) {
-      toRemove.push(item.id);
+      item.status = 'reevaluated';
+      item.reevaluatedAt = Date.now();
+      item.newRuleSnapshot = JSON.parse(JSON.stringify(anomalyRules));
+      reevaluatedCount++;
     }
   });
-  toRemove.forEach(id => unignoreAnomaly(id));
-  return beforeCount - ignoredAnomalies.length;
+  if (reevaluatedCount > 0) {
+    localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
+  }
+  return reevaluatedCount;
 }
 
 function saveAnomalyRules() {

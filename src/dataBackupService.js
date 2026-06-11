@@ -789,21 +789,34 @@ function applyRestore(analysis, importedData, options = {}) {
       return null;
     };
 
-    const existingIds = new Set(current.map(getAnomalyId).filter(Boolean));
+    const existingMap = new Map();
+    current.forEach(item => {
+      const id = getAnomalyId(item);
+      if (id) existingMap.set(id, item);
+    });
+
     const merged = [...current];
     imported.forEach(item => {
       const id = getAnomalyId(item);
-      if (id && !existingIds.has(id)) {
-        if (typeof item === 'string') {
-          merged.push({
-            id: item,
-            ignoredAt: Date.now(),
-            ruleSnapshot: { ...DEFAULT_ANOMALY_RULES }
-          });
-        } else {
-          merged.push(item);
+      if (!id) return;
+
+      const normalizedItem = typeof item === 'string'
+        ? { id: item, status: 'active', ignoredAt: Date.now(), ruleSnapshot: { ...DEFAULT_ANOMALY_RULES } }
+        : item.status === undefined
+          ? { ...item, status: 'active' }
+          : item;
+
+      const existing = existingMap.get(id);
+      if (!existing) {
+        merged.push(normalizedItem);
+        existingMap.set(id, normalizedItem);
+      } else {
+        const existingStatus = existing.status || 'active';
+        const importedStatus = normalizedItem.status || 'active';
+        if (existingStatus === 'reevaluated' && importedStatus === 'active') {
+          const idx = merged.findIndex(m => getAnomalyId(m) === id);
+          if (idx !== -1) merged[idx] = normalizedItem;
         }
-        existingIds.add(id);
       }
     });
     localStorage.setItem(STORAGE_KEYS.ignoredAnomalies, JSON.stringify(merged));
