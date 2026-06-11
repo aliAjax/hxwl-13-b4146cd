@@ -2884,3 +2884,310 @@ td button { margin-left: 6px; background: #e4ecff; }
     width: 100%;
   }
 }
+
+.suggestionHint {
+  color: #6b7280;
+  font-size: 13px;
+  margin: 8px 0 0 0;
+}
+
+.suggestionStats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.suggestionStat {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.suggestionStat.highlight {
+  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+  border-color: #bfdbfe;
+}
+
+.suggestionStat.savings {
+  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+  border-color: #bbf7d0;
+}
+
+.suggestionStatLabel {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.suggestionStatValue {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.suggestionStat.savings .suggestionStatValue {
+  color: #15803d;
+}
+
+.suggestionStatSub {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.suggestionFilters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.suggestionFilterLabel {
+  font-size: 13px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.suggestionFilterBtn {
+  padding: 6px 14px;
+  border: 1px solid #e2e8f0;
+  background: white;
+  border-radius: 999px;
+  font-size: 13px;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.suggestionFilterBtn:hover {
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+.suggestionFilterBtn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: white;
+}
+
+.suggestionEmpty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #94a3b8;
+}
+
+.suggestionEmptyIcon {
+  font-size: 48px;
+  display: block;
+  margin-bottom: 12px;
+}
+
+.suggestionEmptyTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #475569;
+  margin: 0 0 6px 0;
+}
+
+.suggestionEmptyHint {
+  font-size: 13px;
+  margin: 0;
+}
+
+.suggestionCard {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.suggestionCard:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  border-color: #cbd5e1;
+}
+
+.suggestionCard.priority-high {
+  border-left: 4px solid #dc2626;
+}
+
+.suggestionCard.priority-medium {
+  border-left: 4px solid #f59e0b;
+}
+
+.suggestionCard.priority-low {
+  border-left: 4px solid #2563eb;
+}
+
+.suggestionCardHeader {
+  padding: 14px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.suggestionType {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.suggestionIcon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.suggestionTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+  flex: 1;
+}
+
+.suggestionPriority {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.suggestionPriority.priority-high {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.suggestionPriority.priority-medium {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.suggestionPriority.priority-low {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.suggestionCardBody {
+  padding: 14px 16px;
+}
+
+.suggestionDescription {
+  font-size: 14px;
+  color: #475569;
+  line-height: 1.6;
+  margin: 0 0 12px 0;
+}
+
+.suggestionSavings {
+  display: inline-block;
+  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+  color: #15803d;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.suggestionEvidence {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.evidenceTag {
+  display: inline-block;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  margin: 0 6px 6px 0;
+}
+
+.evidenceTag strong {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.evidenceRecords {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.evidenceRecordsLabel {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+  margin-right: 4px;
+}
+
+.evidenceRecordLink {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.evidenceRecordLink:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+.suggestionActions {
+  padding: 12px 16px;
+  background: #fafbfc;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.suggestionActionBtn {
+  padding: 9px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s;
+}
+
+.suggestionActionBtn.primary {
+  background: #2563eb;
+  color: white;
+}
+
+.suggestionActionBtn.primary:hover {
+  background: #1d4ed8;
+}
+
+@media (max-width: 600px) {
+  .suggestionStats {
+    grid-template-columns: 1fr;
+  }
+
+  .suggestionStatValue {
+    font-size: 18px;
+  }
+
+  .suggestionFilters {
+    gap: 6px;
+  }
+
+  .suggestionFilterBtn {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+}

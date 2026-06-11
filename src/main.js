@@ -239,6 +239,9 @@ let backupRestoreOptions = {
   includeScheduleConfig: true
 };
 
+let generatedSuggestions = [];
+let suggestionFilterType = 'all';
+
 function getBackupSourceData() {
   return {
     records,
@@ -338,6 +341,26 @@ document.querySelector('#app').innerHTML = `
       <div id="anomalyRulesContainer" style="display:none; margin-top:16px;"></div>
       <div id="anomalyStats" class="anomalyStats"></div>
       <div id="anomalyListContainer" style="margin-top:16px;"></div>
+    </section>
+
+    <section class="panel" id="suggestionCenterSection">
+      <div class="panelHead">
+        <h2>💡 节能建议中心</h2>
+        <div class="suggestionActions">
+          <button id="refreshSuggestionsBtn" class="primary">🔄 刷新建议</button>
+        </div>
+      </div>
+      <p class="suggestionHint">系统基于最近30天用电记录、成员归因、异常检测和分时电价方案，自动生成个性化节能建议</p>
+      <div id="suggestionStatsContainer" class="suggestionStats"></div>
+      <div id="suggestionFilters" class="suggestionFilters" style="display:none;">
+        <label class="suggestionFilterLabel">筛选类型：</label>
+        <button class="suggestionFilterBtn active" data-filter-type="all">全部</button>
+        <button class="suggestionFilterBtn" data-filter-type="appliance">🔌 电器优化</button>
+        <button class="suggestionFilterBtn" data-filter-type="schedule">🕐 时段转移</button>
+        <button class="suggestionFilterBtn" data-filter-type="member">👨‍👩‍👧 成员行为</button>
+        <button class="suggestionFilterBtn" data-filter-type="anomaly">⚠️ 异常修正</button>
+      </div>
+      <div id="suggestionListContainer" style="margin-top:16px;"></div>
     </section>
 
     <section class="panel" id="csvImportSection">
@@ -3181,6 +3204,433 @@ function applyScheduleToRecords() {
   renderScheduleResult();
 }
 
+function getRecent30DayRecords() {
+  const today = new Date();
+  const thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+  const threshold = thirtyDaysAgo.toISOString().slice(0, 10);
+  return records.filter(r => r.date >= threshold);
+}
+
+function generateSuggestions() {
+  const recentRecords = getRecent30DayRecords();
+  const suggestions = [];
+  const defaultTariff = tariffs.find(t => t.isDefault) || tariffs[0];
+
+  if (recentRecords.length === 0) {
+    return [{
+      id: 'no-data',
+      type: 'info',
+      category: 'info',
+      priority: 'low',
+      icon: '📋',
+      title: '暂无足够数据',
+      description: '最近30天内没有用电记录，请先添加用电记录后再查看节能建议。',
+      evidence: [],
+      action: null
+    }];
+  }
+
+  suggestions.push(...generateApplianceSuggestions(recentRecords, defaultTariff));
+  suggestions.push(...generateScheduleSuggestions(recentRecords, defaultTariff));
+  suggestions.push(...generateMemberSuggestions(recentRecords, defaultTariff));
+  suggestions.push(...generateAnomalySuggestions(recentRecords));
+
+  suggestions.sort((a, b) => {
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    const pa = priorityOrder[a.priority] ?? 99;
+    const pb = priorityOrder[b.priority] ?? 99;
+    if (pa !== pb) return pa - pb;
+    return (b.savings?.kwh || 0) - (a.savings?.kwh || 0);
+  });
+
+  return suggestions;
+}
+
+function generateApplianceSuggestions(recentRecords, defaultTariff) {
+  const suggestions = [];
+  const applianceStats = new Map();
+
+  recentRecords.forEach(record => {
+    const stats = applianceStats.get(record.appliance) || {
+      name: record.appliance,
+      totalKwh: 0,
+      totalCost: 0,
+      recordCount: 0,
+      records: [],
+      peakKwh: 0,
+      valleyKwh: 0,
+      flatKwh: 0
+    };
+    const kwhValue = kwh(record);
+    const tier = getSlotTier(record.slot);
+    const price = defaultTariff ? getTierPrice(defaultTariff, tier) : priceSettings.price;
+    stats.totalKwh += kwhValue;
+    stats.totalCost += kwhValue * price;
+    stats.recordCount++;
+    stats.records.push(record);
+    if (tier === 'peak') stats.peakKwh += kwhValue;
+    else if (tier === 'valley') stats.valleyKwh += kwhValue;
+    else stats.flatKwh += kwhValue;
+    applianceStats.set(record.appliance, stats);
+  });
+
+  const totalKwh = recentRecords.reduce((s, r) => s + kwh(r), 0);
+  const sortedAppliances = [...applianceStats.values()].sort((a, b) => b.totalKwh - a.totalKwh);
+
+  sortedAppliances.forEach((stats, index) => {
+    const share = totalKwh > 0 ? (stats.totalKwh / totalKwh * 100) : 0;
+    const avgHours = stats.records.length > 0
+      ? stats.records.reduce((s, r) => s + r.hours, 0) / stats.records.length
+      : 1;
+
+    if (index === 0 && share > 30 && stats.totalKwh > 10) {
+      const potentialKwh = stats.totalKwh * 0.15;
+      const potentialCost = potentialKwh * (defaultTariff ? defaultTariff.flatPrice : priceSettings.price);
+
+      suggestions.push({
+        id: `appliance-top-${stats.name}`,
+        type: 'appliance',
+        category: 'appliance',
+        priority: share > 50 ? 'high' : 'medium',
+        icon: '🔌',
+        title: `优化「${stats.name}」使用`,
+        description: `「${stats.name}」是最大耗电来源，占总耗电 ${share.toFixed(1)}%（${stats.totalKwh.toFixed(2)}kWh，约 ¥${stats.totalCost.toFixed(2)}）。建议减少使用或调低功率。`,
+        savings: {
+          kwh: potentialKwh,
+          cost: potentialCost
+        },
+        evidence: [
+          { type: 'stat', label: '总耗电', value: `${stats.totalKwh.toFixed(2)}kWh` },
+          { type: 'stat', label: '占比', value: `${share.toFixed(1)}%` },
+          { type: 'stat', label: '使用次数', value: `${stats.recordCount}次` },
+          { type: 'stat', label: '平均时长', value: `${avgHours.toFixed(1)}h/次` },
+          { type: 'records', label: '相关记录', recordIds: stats.records.slice(0, 5).map(r => r.id) }
+        ],
+        action: {
+          type: 'info',
+          text: '在记录中查看详情'
+        }
+      });
+    }
+
+    if (stats.peakKwh > stats.valleyKwh * 2 && stats.peakKwh > 5) {
+      const peakRatio = stats.peakKwh / stats.totalKwh;
+      const shiftPotential = stats.peakKwh * 0.5;
+      const valleyPrice = defaultTariff ? defaultTariff.valleyPrice : priceSettings.price * 0.5;
+      const peakPrice = defaultTariff ? defaultTariff.peakPrice : priceSettings.price;
+      const shiftSavings = shiftPotential * (peakPrice - valleyPrice);
+
+      suggestions.push({
+        id: `appliance-shift-${stats.name}`,
+        type: 'appliance',
+        category: 'schedule',
+        priority: peakRatio > 0.6 ? 'high' : 'medium',
+        icon: '🕐',
+        title: `将「${stats.name}」转移到谷电时段`,
+        description: `「${stats.name}」${(peakRatio * 100).toFixed(0)}% 的耗电发生在峰时段。若将一半转移到谷电时段，可节省约 ¥${shiftSavings.toFixed(2)}/月。`,
+        savings: {
+          kwh: 0,
+          cost: shiftSavings
+        },
+        evidence: [
+          { type: 'stat', label: '峰时段耗电', value: `${stats.peakKwh.toFixed(2)}kWh` },
+          { type: 'stat', label: '谷时段耗电', value: `${stats.valleyKwh.toFixed(2)}kWh` },
+          { type: 'stat', label: '峰电占比', value: `${(peakRatio * 100).toFixed(0)}%` },
+          { type: 'stat', label: '峰谷电价差', value: defaultTariff ? `¥${(defaultTariff.peakPrice - defaultTariff.valleyPrice).toFixed(2)}/kWh` : '未设置' },
+          { type: 'records', label: '峰时段记录', recordIds: stats.records.filter(r => getSlotTier(r.slot) === 'peak').slice(0, 5).map(r => r.id) }
+        ],
+        action: {
+          type: 'addSchedule',
+          text: '一键加入排程优化',
+          taskData: {
+            appliance: stats.name,
+            watts: stats.records[0]?.watts || 500,
+            duration: Math.ceil(avgHours * 2) / 2 || 1,
+            earliestStart: '00:00',
+            deadline: '+06:00',
+            forbiddenRanges: [],
+            tariffId: defaultTariff?.id || ''
+          }
+        }
+      });
+    }
+  });
+
+  return suggestions;
+}
+
+function generateScheduleSuggestions(recentRecords, defaultTariff) {
+  const suggestions = [];
+  if (!defaultTariff) return suggestions;
+
+  const slotStats = new Map();
+  recentRecords.forEach(record => {
+    const tier = getSlotTier(record.slot);
+    const slotName = record.slot;
+    const stats = slotStats.get(slotName) || {
+      slot: slotName,
+      tier,
+      totalKwh: 0,
+      totalCost: 0,
+      recordCount: 0,
+      records: []
+    };
+    const kwhValue = kwh(record);
+    const price = getTierPrice(defaultTariff, tier);
+    stats.totalKwh += kwhValue;
+    stats.totalCost += kwhValue * price;
+    stats.recordCount++;
+    stats.records.push(record);
+    slotStats.set(slotName, stats);
+  });
+
+  const peakSlots = [...slotStats.values()].filter(s => s.tier === 'peak' && s.totalKwh > 3);
+  const valleySlots = [...slotStats.values()].filter(s => s.tier === 'valley');
+
+  if (peakSlots.length > 0 && valleySlots.length === 0) {
+    const totalPeakKwh = peakSlots.reduce((s, x) => s + x.totalKwh, 0);
+    const totalPeakCost = peakSlots.reduce((s, x) => s + x.totalCost, 0);
+    const shiftRatio = 0.3;
+    const potentialSavings = totalPeakKwh * shiftRatio * (defaultTariff.peakPrice - defaultTariff.valleyPrice);
+
+    suggestions.push({
+      id: 'schedule-general-valley',
+      type: 'schedule',
+      category: 'schedule',
+      priority: 'medium',
+      icon: '🌙',
+      title: '充分利用谷电时段',
+      description: `目前所有可调整任务都在峰/平时段运行（共 ${totalPeakKwh.toFixed(1)}kWh，花费 ¥${totalPeakCost.toFixed(2)}）。建议将洗衣机、热水器、充电等任务安排在深夜谷电时段（${defaultTariff.valleyHours.join('、')}）。`,
+      savings: {
+        kwh: 0,
+        cost: potentialSavings
+      },
+      evidence: [
+        { type: 'stat', label: '峰平时段耗电', value: `${totalPeakKwh.toFixed(2)}kWh` },
+        { type: 'stat', label: '谷电价格', value: `¥${defaultTariff.valleyPrice.toFixed(2)}/kWh` },
+        { type: 'stat', label: '峰电价格', value: `¥${defaultTariff.peakPrice.toFixed(2)}/kWh` },
+        { type: 'stat', label: '预计节省', value: `¥${potentialSavings.toFixed(2)}（转移30%）` },
+        { type: 'records', label: '峰时段记录', recordIds: peakSlots.flatMap(s => s.records.slice(0, 2).map(r => r.id)) }
+      ],
+      action: {
+        type: 'navigate',
+        text: '前往排程优化',
+        target: 'scheduleOptimizerSection'
+      }
+    });
+  }
+
+  if (defaultTariff) {
+    const totalKwh = recentRecords.reduce((s, r) => s + kwh(r), 0);
+    const peakKwh = recentRecords.filter(r => getSlotTier(r.slot) === 'peak').reduce((s, r) => s + kwh(r), 0);
+    const peakRatio = totalKwh > 0 ? peakKwh / totalKwh : 0;
+    if (peakRatio > 0.4) {
+      suggestions.push({
+        id: 'schedule-peak-ratio',
+        type: 'schedule',
+        category: 'schedule',
+        priority: peakRatio > 0.6 ? 'high' : 'medium',
+        icon: '📊',
+        title: '峰时段用电占比偏高',
+        description: `峰时段耗电占比达 ${(peakRatio * 100).toFixed(0)}%（¥${defaultTariff.peakPrice.toFixed(2)}/kWh vs 谷电 ¥${defaultTariff.valleyPrice.toFixed(2)}/kWh）。建议优先把可延后的任务移出峰时段。`,
+        savings: {
+          kwh: 0,
+          cost: peakKwh * 0.2 * (defaultTariff.peakPrice - defaultTariff.valleyPrice)
+        },
+        evidence: [
+          { type: 'stat', label: '峰电占比', value: `${(peakRatio * 100).toFixed(0)}%` },
+          { type: 'stat', label: '峰时段耗电', value: `${peakKwh.toFixed(2)}kWh` },
+          { type: 'stat', label: '峰谷价差', value: `¥${(defaultTariff.peakPrice - defaultTariff.valleyPrice).toFixed(2)}/kWh` }
+        ],
+        action: null
+      });
+    }
+  }
+
+  return suggestions;
+}
+
+function generateMemberSuggestions(recentRecords, defaultTariff) {
+  const suggestions = [];
+  const memberStats = getMemberStatsForSuggestions(recentRecords, defaultTariff);
+
+  if (memberStats.length < 2) return suggestions;
+
+  const topMember = memberStats[0];
+  const avgKwh = memberStats.reduce((s, m) => s + m.totalKwh, 0) / memberStats.length;
+
+  if (topMember && topMember.name !== UNASSIGNED_LABEL && topMember.totalKwh > avgKwh * 1.5 && topMember.totalKwh > 5) {
+    const excessKwh = topMember.totalKwh - avgKwh;
+    const excessCost = excessKwh * (defaultTariff ? defaultTariff.flatPrice : priceSettings.price);
+
+    suggestions.push({
+      id: `member-top-${topMember.name}`,
+      type: 'member',
+      category: 'member',
+      priority: 'medium',
+      icon: '👤',
+      title: `关注「${topMember.name}」的用电习惯`,
+      description: `「${topMember.name}」用电量（${topMember.totalKwh.toFixed(2)}kWh）是家庭均值的 ${(topMember.totalKwh / avgKwh).toFixed(1)} 倍。主要耗电设备：${topMember.topAppliances.map(a => a.name).join('、')}。`,
+      savings: {
+        kwh: excessKwh * 0.3,
+        cost: excessCost * 0.3
+      },
+      evidence: [
+        { type: 'stat', label: '个人耗电', value: `${topMember.totalKwh.toFixed(2)}kWh` },
+        { type: 'stat', label: '家庭均值', value: `${avgKwh.toFixed(2)}kWh` },
+        { type: 'stat', label: '使用次数', value: `${topMember.recordCount}次` },
+        { type: 'stat', label: '主要设备', value: topMember.topAppliances.map(a => `${a.name}(${a.kwh.toFixed(1)}kWh)`).join('、') },
+        { type: 'records', label: `${topMember.name}的记录`, recordIds: topMember.recordIds.slice(0, 5) }
+      ],
+      action: null
+    });
+  }
+
+  const unassigned = memberStats.find(m => m.name === UNASSIGNED_LABEL);
+  if (unassigned && unassigned.totalKwh > 5) {
+    suggestions.push({
+      id: 'member-unassigned',
+      type: 'member',
+      category: 'member',
+      priority: 'low',
+      icon: '🏷️',
+      title: '完善成员归因',
+      description: `有 ${unassigned.recordCount} 条记录（${unassigned.totalKwh.toFixed(2)}kWh）未分配使用成员。完善归因可获得更精准的节能建议。`,
+      savings: null,
+      evidence: [
+        { type: 'stat', label: '未分配记录', value: `${unassigned.recordCount}条` },
+        { type: 'stat', label: '涉及耗电', value: `${unassigned.totalKwh.toFixed(2)}kWh` }
+      ],
+      action: {
+        type: 'navigate',
+        text: '去批量分配',
+        target: 'memberStatsSection'
+      }
+    });
+  }
+
+  return suggestions;
+}
+
+function getMemberStatsForSuggestions(recentRecords, defaultTariff) {
+  const stats = new Map();
+  const allMemberNames = [...members.map(m => m.name), UNASSIGNED_LABEL];
+
+  allMemberNames.forEach(name => {
+    stats.set(name, {
+      name,
+      totalKwh: 0,
+      totalCost: 0,
+      recordCount: 0,
+      recordIds: [],
+      appliances: new Map()
+    });
+  });
+
+  recentRecords.forEach(record => {
+    const memberName = getMemberName(record);
+    const memberStat = stats.get(memberName) || stats.get(UNASSIGNED_LABEL);
+    const kwhValue = kwh(record);
+    const tier = getSlotTier(record.slot);
+    const price = defaultTariff ? getTierPrice(defaultTariff, tier) : priceSettings.price;
+
+    memberStat.totalKwh += kwhValue;
+    memberStat.totalCost += kwhValue * price;
+    memberStat.recordCount++;
+    memberStat.recordIds.push(record.id);
+
+    const applianceCount = memberStat.appliances.get(record.appliance) || { count: 0, kwh: 0 };
+    applianceCount.count += 1;
+    applianceCount.kwh += kwhValue;
+    memberStat.appliances.set(record.appliance, applianceCount);
+  });
+
+  return [...stats.values()]
+    .filter(s => s.recordCount > 0)
+    .map(s => ({
+      ...s,
+      topAppliances: [...s.appliances.entries()]
+        .sort((a, b) => b[1].kwh - a[1].kwh)
+        .slice(0, 3)
+        .map(([name, data]) => ({ name, count: data.count, kwh: data.kwh }))
+    }))
+    .sort((a, b) => b.totalKwh - a.totalKwh);
+}
+
+function generateAnomalySuggestions(recentRecords) {
+  const suggestions = [];
+  const anomalies = getAllAnomalies();
+  const activeAnomalies = anomalies.filter(a => !a.ignored);
+
+  if (activeAnomalies.length > 0) {
+    const highSeverity = activeAnomalies.filter(a => a.severity === 'high');
+    const totalWasteKwh = activeAnomalies.reduce((s, a) => s + (a.stats?.deviationAmount || 0), 0);
+    const totalWasteCost = totalWasteKwh * priceSettings.price;
+
+    suggestions.push({
+      id: 'anomaly-fix',
+      type: 'anomaly',
+      category: 'anomaly',
+      priority: highSeverity.length > 0 ? 'high' : 'medium',
+      icon: '⚠️',
+      title: `处理 ${activeAnomalies.length} 条异常用电`,
+      description: `检测到 ${activeAnomalies.length} 条异常用电记录${highSeverity.length > 0 ? `（含 ${highSeverity.length} 条高危）` : ''}，涉及额外耗电约 ${totalWasteKwh.toFixed(2)}kWh（¥${totalWasteCost.toFixed(2)}）。`,
+      savings: {
+        kwh: totalWasteKwh * 0.8,
+        cost: totalWasteCost * 0.8
+      },
+      evidence: [
+        { type: 'stat', label: '异常记录数', value: `${activeAnomalies.length}条` },
+        { type: 'stat', label: '高危异常', value: `${highSeverity.length}条` },
+        { type: 'stat', label: '额外耗电', value: `${totalWasteKwh.toFixed(2)}kWh` },
+        { type: 'anomalies', label: '异常列表', anomalyIds: activeAnomalies.slice(0, 5).map(a => a.id) }
+      ],
+      action: {
+        type: 'navigate',
+        text: '查看异常详情',
+        target: 'anomalyAlertSection'
+      }
+    });
+  }
+
+  const longRunningAppliances = new Map();
+  recentRecords.forEach(record => {
+    if (record.hours >= 8) {
+      const list = longRunningAppliances.get(record.appliance) || [];
+      list.push(record);
+      longRunningAppliances.set(record.appliance, list);
+    }
+  });
+
+  longRunningAppliances.forEach((recs, name) => {
+    if (recs.length >= 2 && name !== '冰箱') {
+      const totalHours = recs.reduce((s, r) => s + r.hours, 0);
+      suggestions.push({
+        id: `long-running-${name}`,
+        type: 'anomaly',
+        category: 'appliance',
+        priority: 'medium',
+        icon: '⏰',
+        title: `「${name}」存在长时间运行`,
+        description: `「${name}」有 ${recs.length} 次运行超过 8 小时（累计 ${totalHours.toFixed(1)}h），请检查是否忘记关闭或存在异常。`,
+        savings: {
+          kwh: recs.reduce((s, r) => s + kwh(r), 0) * 0.3,
+          cost: recs.reduce((s, r) => s + kwh(r), 0) * 0.3 * priceSettings.price
+        },
+        evidence: [
+          { type: 'stat', label: '超长次数', value: `${recs.length}次` },
+          { type: 'stat', label: '累计时长', value: `${totalHours.toFixed(1)}小时` },
+          { type: 'records', label: '相关记录', recordIds: recs.map(r => r.id) }
+        ],
+        action: null
+      });
+    }
+  });
+
+  return suggestions;
+}
+
 function showToast(type, title, message, duration = 4000) {
   const icons = {
     success: '✅',
@@ -3415,6 +3865,7 @@ function save() {
   localStorage.setItem(applianceKey, JSON.stringify(appliances));
   localStorage.setItem(memberKey, JSON.stringify(members));
   localStorage.setItem(scheduleTaskKey, JSON.stringify(scheduleTasks));
+  generatedSuggestions = [];
 }
 
 function saveMapping() {
@@ -3687,7 +4138,248 @@ function updateFilterOptions() {
     slotOptions.map(s => `<option value="${s}" ${s === currentSlotValue ? 'selected' : ''}>${s}</option>`).join('');
 }
 
+function renderSuggestionCenter() {
+  if (generatedSuggestions.length === 0) {
+    generatedSuggestions = generateSuggestions();
+  }
+
+  const filteredSuggestions = suggestionFilterType === 'all'
+    ? generatedSuggestions
+    : generatedSuggestions.filter(s => s.category === suggestionFilterType);
+
+  const statsContainer = document.querySelector('#suggestionStatsContainer');
+  const filtersContainer = document.querySelector('#suggestionFilters');
+  const listContainer = document.querySelector('#suggestionListContainer');
+
+  const recentRecords = getRecent30DayRecords();
+  const totalKwh = recentRecords.reduce((s, r) => s + kwh(r), 0);
+  const totalSavingsKwh = generatedSuggestions.reduce((s, x) => s + (x.savings?.kwh || 0), 0);
+  const totalSavingsCost = generatedSuggestions.reduce((s, x) => s + (x.savings?.cost || 0), 0);
+  const highPriorityCount = generatedSuggestions.filter(s => s.priority === 'high').length;
+  const mediumPriorityCount = generatedSuggestions.filter(s => s.priority === 'medium').length;
+
+  statsContainer.innerHTML = `
+    <div class="suggestionStat">
+      <span class="suggestionStatLabel">分析周期</span>
+      <strong class="suggestionStatValue">最近30天</strong>
+      <span class="suggestionStatSub">${recentRecords.length} 条记录 · ${totalKwh.toFixed(1)} kWh</span>
+    </div>
+    <div class="suggestionStat highlight">
+      <span class="suggestionStatLabel">优化建议</span>
+      <strong class="suggestionStatValue">${generatedSuggestions.length} 条</strong>
+      <span class="suggestionStatSub">${highPriorityCount} 高优 · ${mediumPriorityCount} 中优</span>
+    </div>
+    <div class="suggestionStat savings">
+      <span class="suggestionStatLabel">预计节电</span>
+      <strong class="suggestionStatValue">${totalSavingsKwh.toFixed(1)} kWh</strong>
+      <span class="suggestionStatSub">约 ¥${totalSavingsCost.toFixed(2)}</span>
+    </div>
+  `;
+
+  if (generatedSuggestions.length > 1) {
+    filtersContainer.style.display = 'flex';
+    filtersContainer.querySelectorAll('.suggestionFilterBtn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.filterType === suggestionFilterType);
+    });
+  } else {
+    filtersContainer.style.display = 'none';
+  }
+
+  if (filteredSuggestions.length === 0) {
+    listContainer.innerHTML = `
+      <div class="suggestionEmpty">
+        <span class="suggestionEmptyIcon">✨</span>
+        <p class="suggestionEmptyTitle">暂无该类型的节能建议</p>
+        <p class="suggestionEmptyHint">继续保持良好的用电习惯！</p>
+      </div>
+    `;
+    return;
+  }
+
+  listContainer.innerHTML = filteredSuggestions.map(function(suggestion) {
+    const priorityClass = 'priority-' + suggestion.priority;
+    const priorityLabel = suggestion.priority === 'high' ? '高优' : suggestion.priority === 'medium' ? '中优' : '低优';
+
+    let savingsHtml = '';
+    if (suggestion.savings) {
+      const parts = [];
+      if (suggestion.savings.kwh > 0) parts.push(`${suggestion.savings.kwh.toFixed(1)} kWh`);
+      if (suggestion.savings.cost > 0) parts.push(`¥${suggestion.savings.cost.toFixed(2)}`);
+      if (parts.length > 0) {
+        savingsHtml = `<span class="suggestionSavings">💡 可节省 ${parts.join(' / ')}</span>`;
+      }
+    }
+
+    const evidenceHtml = suggestion.evidence && suggestion.evidence.length > 0
+      ? `<div class="suggestionEvidence">
+          ${suggestion.evidence.map(function(ev) {
+            if (ev.type === 'stat') {
+              return `<span class="evidenceTag"><strong>${escapeHtml(ev.label)}:</strong> ${escapeHtml(ev.value)}</span>`;
+            }
+            if (ev.type === 'records' && ev.recordIds && ev.recordIds.length > 0) {
+              return `<div class="evidenceRecords">
+                <span class="evidenceRecordsLabel">${escapeHtml(ev.label)}:</span>
+                ${ev.recordIds.map(function(rid) {
+                  return `<button class="evidenceRecordLink" data-locate-record="${rid}">查看记录</button>`;
+                }).join('')}
+              </div>`;
+            }
+            if (ev.type === 'anomalies' && ev.anomalyIds && ev.anomalyIds.length > 0) {
+              return `<div class="evidenceRecords">
+                <span class="evidenceRecordsLabel">${escapeHtml(ev.label)}:</span>
+                ${ev.anomalyIds.map(function(aid) {
+                  return `<button class="evidenceRecordLink" data-locate-anomaly="${aid}">查看异常</button>`;
+                }).join('')}
+              </div>`;
+            }
+            return '';
+          }).join('')}
+        </div>`
+      : '';
+
+    let actionHtml = '';
+    if (suggestion.action) {
+      const actionData = JSON.stringify(suggestion.action).replace(/"/g, '&quot;');
+      const taskData = suggestion.action.taskData ? JSON.stringify(suggestion.action.taskData).replace(/"/g, '&quot;') : '';
+      actionHtml = `<div class="suggestionActions">
+        <button class="suggestionActionBtn primary" 
+          data-action-type="${suggestion.action.type}"
+          data-action-target="${suggestion.action.target || ''}"
+          data-action-task="${taskData}"
+          data-action="${actionData}">
+          ${escapeHtml(suggestion.action.text)}
+        </button>
+      </div>`;
+    }
+
+    return `
+      <div class="suggestionCard ${priorityClass}" data-suggestion-id="${suggestion.id}">
+        <div class="suggestionCardHeader">
+          <div class="suggestionType">
+            <span class="suggestionIcon">${suggestion.icon}</span>
+            <span class="suggestionTitle">${escapeHtml(suggestion.title)}</span>
+            <span class="suggestionPriority ${priorityClass}">${priorityLabel}</span>
+          </div>
+        </div>
+        <div class="suggestionCardBody">
+          <p class="suggestionDescription">${escapeHtml(suggestion.description)}</p>
+          ${savingsHtml}
+          ${evidenceHtml}
+        </div>
+        ${actionHtml}
+      </div>
+    `;
+  }).join('');
+
+  bindSuggestionEvents();
+}
+
+function bindSuggestionEvents() {
+  const container = document.querySelector('#suggestionListContainer');
+  if (!container) return;
+
+  container.querySelectorAll('[data-locate-record]').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const recordId = this.dataset.locateRecord;
+      locateToRecord(recordId);
+    });
+  });
+
+  container.querySelectorAll('[data-locate-anomaly]').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const anomalyId = this.dataset.locateAnomaly;
+      const anomalySection = document.querySelector('#anomalyAlertSection');
+      if (anomalySection) {
+        anomalySection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  });
+
+  container.querySelectorAll('.suggestionActionBtn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const actionType = this.dataset.actionType;
+      const actionTarget = this.dataset.actionTarget;
+
+      if (actionType === 'addSchedule') {
+        try {
+          const taskData = JSON.parse(this.dataset.actionTask);
+          addSuggestionToSchedule(taskData);
+        } catch (e) {
+          showToast('error', '操作失败', '任务数据解析失败');
+        }
+      } else if (actionType === 'navigate' && actionTarget) {
+        const target = document.querySelector('#' + actionTarget);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      } else if (actionType === 'info') {
+        const searchInput = document.querySelector('#search');
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    });
+  });
+}
+
+function addSuggestionToSchedule(taskData) {
+  if (!taskData || !taskData.appliance) {
+    showToast('error', '操作失败', '任务数据不完整');
+    return;
+  }
+
+  const exists = scheduleTasks.some(t => t.appliance === taskData.appliance);
+  if (exists) {
+    showToast('warning', '已存在', `排程任务「${taskData.appliance}」已在列表中`);
+    return;
+  }
+
+  const newTask = {
+    id: crypto.randomUUID(),
+    appliance: taskData.appliance,
+    watts: Number(taskData.watts) || 500,
+    duration: Number(taskData.duration) || 1,
+    deadline: taskData.deadline || '22:00',
+    earliestStart: taskData.earliestStart || '00:00',
+    forbiddenRanges: taskData.forbiddenRanges || [],
+    tariffId: taskData.tariffId || ''
+  };
+
+  scheduleTasks = [newTask, ...scheduleTasks];
+  scheduleResult = null;
+  localStorage.setItem(scheduleTaskKey, JSON.stringify(scheduleTasks));
+  localStorage.setItem(scheduleResultKey, JSON.stringify(null));
+
+  showToast('success', '已加入排程', `「${taskData.appliance}」已加入用电排程优化列表`);
+  renderScheduleTaskList();
+  renderScheduleResult();
+}
+
+function bindSuggestionHeaderEvents() {
+  const refreshBtn = document.querySelector('#refreshSuggestionsBtn');
+  if (refreshBtn && !refreshBtn.dataset.bound) {
+    refreshBtn.dataset.bound = 'true';
+    refreshBtn.addEventListener('click', function() {
+      generatedSuggestions = generateSuggestions();
+      renderSuggestionCenter();
+      showToast('success', '已刷新', '节能建议已根据最新数据重新生成');
+    });
+  }
+
+  document.querySelectorAll('.suggestionFilterBtn').forEach(btn => {
+    if (!btn.dataset.bound) {
+      btn.dataset.bound = 'true';
+      btn.addEventListener('click', function() {
+        suggestionFilterType = this.dataset.filterType;
+        renderSuggestionCenter();
+      });
+    }
+  });
+}
+
 function render() {
+  bindSuggestionHeaderEvents();
   updateFilterOptions();
   const filtered = getFilteredRecords();
   const total = records.reduce(function(sum, record) { return sum + kwh(record); }, 0);
@@ -3713,6 +4405,7 @@ function render() {
   renderTariffComparison();
   renderTariffDetail();
   renderAnomalyAlerts();
+  renderSuggestionCenter();
   renderScheduleTaskList();
   renderScheduleResult();
   renderScheduleTariffSelect();
