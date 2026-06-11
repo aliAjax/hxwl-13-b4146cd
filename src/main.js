@@ -23,6 +23,20 @@ const scheduleTaskKey = 'hxwl-13-home-energy-schedule-tasks';
 const scheduleResultKey = 'hxwl-13-home-energy-schedule-result';
 const scheduleConfigKey = 'hxwl-13-home-energy-schedule-config';
 
+const ANOMALY_STATUS = {
+  PENDING: 'pending',
+  CONFIRMED: 'confirmed',
+  FALSE_POSITIVE: 'false_positive',
+  RESOLVED: 'resolved'
+};
+
+const ANOMALY_STATUS_LABELS = {
+  [ANOMALY_STATUS.PENDING]: { label: '待处理', color: '#f59e0b', bgColor: '#fef3c7' },
+  [ANOMALY_STATUS.CONFIRMED]: { label: '已确认', color: '#2563eb', bgColor: '#dbeafe' },
+  [ANOMALY_STATUS.FALSE_POSITIVE]: { label: '误报', color: '#6b7280', bgColor: '#f3f4f6' },
+  [ANOMALY_STATUS.RESOLVED]: { label: '已解决', color: '#16a34a', bgColor: '#dcfce7' }
+};
+
 const ANOMALY_SENSITIVITY_MAP = {
   low:    { stdDevMultiplier: 2.5, minRatioMultiplier: 1.6, label: '低敏感' },
   medium: { stdDevMultiplier: 1.5, minRatioMultiplier: 1.3, label: '中敏感' },
@@ -190,24 +204,56 @@ function migrateIgnoredAnomalies() {
 
   const isStringItem = ignoredAnomalies.some(item => typeof item === 'string');
   const missingStatus = ignoredAnomalies.some(item => typeof item === 'object' && item.status === undefined);
+  const hasOldStatus = ignoredAnomalies.some(item => 
+    typeof item === 'object' && 
+    (item.status === 'active' || item.status === 'reevaluated')
+  );
+  const missingHandleStatus = ignoredAnomalies.some(item => 
+    typeof item === 'object' && item.handleStatus === undefined
+  );
 
-  if (!isStringItem && !missingStatus) return;
+  if (!isStringItem && !missingStatus && !hasOldStatus && !missingHandleStatus) return;
 
   const migrated = ignoredAnomalies.map(item => {
     if (typeof item === 'string') {
       return {
         id: item,
-        status: 'active',
+        status: 'ignored',
+        handleStatus: ANOMALY_STATUS.FALSE_POSITIVE,
+        note: '',
         ignoredAt: Date.now(),
+        handleAt: Date.now(),
         ruleSnapshot: JSON.parse(JSON.stringify(anomalyRules))
       };
-    } else if (item.status === undefined) {
-      return {
-        ...item,
-        status: 'active'
-      };
     }
-    return item;
+    
+    let newItem = { ...item };
+    
+    if (item.status === undefined) {
+      newItem.status = 'ignored';
+    } else if (item.status === 'active') {
+      newItem.status = 'ignored';
+    } else if (item.status === 'reevaluated') {
+      newItem.status = 'reevaluated';
+    }
+    
+    if (item.handleStatus === undefined) {
+      if (item.status === 'reevaluated') {
+        newItem.handleStatus = ANOMALY_STATUS.PENDING;
+      } else {
+        newItem.handleStatus = ANOMALY_STATUS.FALSE_POSITIVE;
+      }
+    }
+    
+    if (item.note === undefined) {
+      newItem.note = '';
+    }
+    
+    if (item.handleAt === undefined && (item.ignoredAt || item.reevaluatedAt)) {
+      newItem.handleAt = item.ignoredAt || item.reevaluatedAt;
+    }
+    
+    return newItem;
   });
 
   ignoredAnomalies = migrated;
@@ -1944,26 +1990,79 @@ function getAnomalyId(type, recordId, date) {
 }
 
 function isAnomalyIgnored(anomalyId) {
-  return ignoredAnomalies.some(item => item.id === anomalyId && item.status === 'active');
+  return ignoredAnomalies.some(item => item.id === anomalyId && item.status === 'ignored');
+}
+
+function isAnomalyReevaluated(anomalyId) {
+  return ignoredAnomalies.some(item => item.id === anomalyId && item.status === 'reevaluated');
 }
 
 function getIgnoredAnomalyRecord(anomalyId) {
   return ignoredAnomalies.find(item => item.id === anomalyId);
 }
 
-function ignoreAnomaly(anomalyId) {
+function getAnomalyHandleStatus(anomalyId) {
+  const record = getIgnoredAnomalyRecord(anomalyId);
+  if (!record) return { handleStatus: null, note: '', needsReconfirm: false };
+  return {
+    handleStatus: record.handleStatus || ANOMALY_STATUS.PENDING,
+    note: record.note || '',
+    needsReconfirm: record.status === 'reevaluated',
+    handleAt: record.handleAt,
+    ignoredAt: record.ignoredAt
+  };
+}
+
+function updateAnomalyHandleStatus(anomalyId, handleStatus, note = '') {
   const existing = getIgnoredAnomalyRecord(anomalyId);
   if (existing) {
-    existing.status = 'active';
+    existing.handleStatus = handleStatus;
+    existing.note = note || '';
+    existing.handleAt = Date.now();
+    
+    if (handleStatus === ANOMALY_STATUS.FALSE_POSITIVE) {
+      existing.status = 'ignored';
+    } else if (handleStatus === ANOMALY_STATUS.PENDING) {
+      existing.status = 'reevaluated';
+    } else {
+      existing.status = 'ignored';
+    }
+    
+    delete existing.reevaluatedAt;
+    delete existing.newRuleSnapshot;
+  } else {
+    ignoredAnomalies.push({
+      id: anomalyId,
+      status: handleStatus === ANOMALY_STATUS.FALSE_POSITIVE ? 'ignored' : 'ignored',
+      handleStatus: handleStatus,
+      note: note || '',
+      ignoredAt: Date.now(),
+      handleAt: Date.now(),
+      ruleSnapshot: JSON.parse(JSON.stringify(anomalyRules))
+    });
+  }
+  localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
+}
+
+function ignoreAnomaly(anomalyId, handleStatus = ANOMALY_STATUS.FALSE_POSITIVE, note = '') {
+  const existing = getIgnoredAnomalyRecord(anomalyId);
+  if (existing) {
+    existing.status = 'ignored';
+    existing.handleStatus = handleStatus;
+    existing.note = note || '';
     existing.ignoredAt = Date.now();
+    existing.handleAt = Date.now();
     existing.ruleSnapshot = JSON.parse(JSON.stringify(anomalyRules));
     delete existing.reevaluatedAt;
     delete existing.newRuleSnapshot;
   } else {
     ignoredAnomalies.push({
       id: anomalyId,
-      status: 'active',
+      status: 'ignored',
+      handleStatus: handleStatus,
+      note: note || '',
       ignoredAt: Date.now(),
+      handleAt: Date.now(),
       ruleSnapshot: JSON.parse(JSON.stringify(anomalyRules))
     });
   }
@@ -1989,12 +2088,15 @@ function reevaluateIgnoredAnomalies(oldRules) {
   if (!oldRules || !haveRulesChanged(oldRules, anomalyRules)) return 0;
   let reevaluatedCount = 0;
   ignoredAnomalies.forEach(item => {
-    if (item.status !== 'active') return;
+    if (item.status !== 'ignored') return;
     const itemRules = item.ruleSnapshot || oldRules;
     if (haveRulesChanged(itemRules, anomalyRules)) {
       item.status = 'reevaluated';
       item.reevaluatedAt = Date.now();
       item.newRuleSnapshot = JSON.parse(JSON.stringify(anomalyRules));
+      if (!item.handleStatus) {
+        item.handleStatus = ANOMALY_STATUS.PENDING;
+      }
       reevaluatedCount++;
     }
   });
@@ -2143,7 +2245,11 @@ function detectHighSingleUsage(sourceRecords = records) {
       const recordKwh = kwh(record);
       if (recordKwh > threshold && recordKwh > mean * minRatio) {
         const anomalyId = getAnomalyId('high-single', record.id);
-        if (!showIgnoredAnomalies && isAnomalyIgnored(anomalyId)) return;
+        const handleStatusInfo = getAnomalyHandleStatus(anomalyId);
+        const isIgnored = isAnomalyIgnored(anomalyId);
+        const needsReconfirm = isAnomalyReevaluated(anomalyId);
+        
+        if (!showIgnoredAnomalies && isIgnored && !needsReconfirm) return;
 
         const deviation = ((recordKwh / mean - 1) * 100).toFixed(0);
         const deviationAmount = (recordKwh - mean).toFixed(2);
@@ -2169,7 +2275,10 @@ function detectHighSingleUsage(sourceRecords = records) {
             sensitivity: rule.sensitivity,
             sensitivityLabel: sens.label
           },
-          ignored: isAnomalyIgnored(anomalyId)
+          ignored: isIgnored,
+          handleStatus: handleStatusInfo.handleStatus,
+          handleNote: handleStatusInfo.note,
+          needsReconfirm: needsReconfirm
         });
       }
     });
@@ -2204,7 +2313,11 @@ function detectDailySpike(sourceRecords = records) {
     if (total > threshold && total > mean * minRatio) {
       const dayRecords = sourceRecords.filter(r => r.date === date);
       const anomalyId = getAnomalyId('daily-spike', null, date);
-      if (!showIgnoredAnomalies && isAnomalyIgnored(anomalyId)) return;
+      const handleStatusInfo = getAnomalyHandleStatus(anomalyId);
+      const isIgnored = isAnomalyIgnored(anomalyId);
+      const needsReconfirm = isAnomalyReevaluated(anomalyId);
+      
+      if (!showIgnoredAnomalies && isIgnored && !needsReconfirm) return;
 
       const deviation = ((total / mean - 1) * 100).toFixed(0);
       const deviationAmount = (total - mean).toFixed(2);
@@ -2228,7 +2341,10 @@ function detectDailySpike(sourceRecords = records) {
           sensitivity: rule.sensitivity,
           sensitivityLabel: sens.label
         },
-        ignored: isAnomalyIgnored(anomalyId)
+        ignored: isIgnored,
+        handleStatus: handleStatusInfo.handleStatus,
+        handleNote: handleStatusInfo.note,
+        needsReconfirm: needsReconfirm
       });
     }
   });
@@ -2264,7 +2380,11 @@ function detectAbnormalDuration(sourceRecords = records) {
     applianceRecs.forEach(record => {
       if (record.hours > threshold && record.hours > mean * minRatio) {
         const anomalyId = getAnomalyId('duration', record.id);
-        if (!showIgnoredAnomalies && isAnomalyIgnored(anomalyId)) return;
+        const handleStatusInfo = getAnomalyHandleStatus(anomalyId);
+        const isIgnored = isAnomalyIgnored(anomalyId);
+        const needsReconfirm = isAnomalyReevaluated(anomalyId);
+        
+        if (!showIgnoredAnomalies && isIgnored && !needsReconfirm) return;
 
         const deviation = ((record.hours / mean - 1) * 100).toFixed(0);
         const deviationAmount = (record.hours - mean).toFixed(1);
@@ -2290,7 +2410,10 @@ function detectAbnormalDuration(sourceRecords = records) {
             sensitivity: rule.sensitivity,
             sensitivityLabel: sens.label
           },
-          ignored: isAnomalyIgnored(anomalyId)
+          ignored: isIgnored,
+          handleStatus: handleStatusInfo.handleStatus,
+          handleNote: handleStatusInfo.note,
+          needsReconfirm: needsReconfirm
         });
       }
     });
@@ -2337,10 +2460,14 @@ function locateToRecord(recordId) {
 
 function renderAnomalyAlerts() {
   const anomalies = getAllAnomalies();
-  const highCount = anomalies.filter(a => a.severity === 'high' && !a.ignored).length;
-  const mediumCount = anomalies.filter(a => a.severity === 'medium' && !a.ignored).length;
-  const ignoredCount = anomalies.filter(a => a.ignored).length;
-  const activeCount = anomalies.filter(a => !a.ignored).length;
+  const highCount = anomalies.filter(a => a.severity === 'high').length;
+  const mediumCount = anomalies.filter(a => a.severity === 'medium').length;
+  
+  const pendingCount = anomalies.filter(a => !a.handleStatus || a.handleStatus === ANOMALY_STATUS.PENDING).length;
+  const confirmedCount = anomalies.filter(a => a.handleStatus === ANOMALY_STATUS.CONFIRMED).length;
+  const falsePositiveCount = anomalies.filter(a => a.handleStatus === ANOMALY_STATUS.FALSE_POSITIVE).length;
+  const resolvedCount = anomalies.filter(a => a.handleStatus === ANOMALY_STATUS.RESOLVED).length;
+  const reconfirmCount = anomalies.filter(a => a.needsReconfirm).length;
 
   anomalyStats.innerHTML = `
     <span class="anomalyStat high">
@@ -2354,13 +2481,27 @@ function renderAnomalyAlerts() {
       <span>中等异常</span>
     </span>
     <span class="anomalyStat active">
-      <strong>${activeCount}</strong>
+      <strong>${pendingCount}</strong>
       <span>待处理</span>
     </span>
-    <span class="anomalyStat ignored">
-      <strong>${ignoredCount}</strong>
-      <span>已忽略</span>
+    <span class="anomalyStat confirmed" style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-color: #bfdbfe;">
+      <strong>${confirmedCount}</strong>
+      <span>已确认</span>
     </span>
+    <span class="anomalyStat resolved" style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border-color: #bbf7d0;">
+      <strong>${resolvedCount}</strong>
+      <span>已解决</span>
+    </span>
+    <span class="anomalyStat ignored">
+      <strong>${falsePositiveCount}</strong>
+      <span>误报/忽略</span>
+    </span>
+    ${reconfirmCount > 0 ? `
+    <span class="anomalyStat reconfirm" style="background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%); border-color: #fde047;">
+      <strong>${reconfirmCount}</strong>
+      <span>需重新确认</span>
+    </span>
+    ` : ''}
   `;
 
   if (anomalies.length === 0) {
@@ -2374,12 +2515,12 @@ function renderAnomalyAlerts() {
     return;
   }
 
-  if (!showIgnoredAnomalies && activeCount === 0) {
+  if (!showIgnoredAnomalies && pendingCount === 0 && confirmedCount === 0 && resolvedCount === 0 && reconfirmCount === 0) {
     anomalyListContainer.innerHTML = `
       <div class="anomalyEmpty">
         <span class="anomalyEmptyIcon">📋</span>
         <p>所有异常已处理</p>
-        <span class="anomalyEmptyHint">点击「显示已忽略」查看已忽略的异常记录</span>
+        <span class="anomalyEmptyHint">点击「显示已忽略」查看已标记为误报的异常记录</span>
       </div>
     `;
     return;
@@ -2388,9 +2529,12 @@ function renderAnomalyAlerts() {
   anomalyListContainer.innerHTML = anomalies.map(anomaly => {
     const severityClass = anomaly.severity === 'high' ? 'high' : 'medium';
     const typeIcon = anomaly.type === 'high-single' ? '⚡' : anomaly.type === 'daily-spike' ? '📈' : '⏰';
-    const ignoreText = anomaly.ignored ? '取消忽略' : '忽略';
     const locateText = anomaly.type === 'daily-spike' ? '查看当日记录' : '定位记录';
     const hasStats = anomaly.stats && Object.keys(anomaly.stats).length > 0;
+    const handleStatus = anomaly.handleStatus || ANOMALY_STATUS.PENDING;
+    const statusInfo = ANOMALY_STATUS_LABELS[handleStatus] || ANOMALY_STATUS_LABELS[ANOMALY_STATUS.PENDING];
+    const needsReconfirm = anomaly.needsReconfirm;
+    const currentNote = anomaly.handleNote || '';
 
     let statsHtml = '';
     if (hasStats) {
@@ -2421,28 +2565,72 @@ function renderAnomalyAlerts() {
       `;
     }
 
+    const statusOptions = Object.entries(ANOMALY_STATUS_LABELS).map(([key, info]) => `
+      <option value="${key}" ${handleStatus === key ? 'selected' : ''}>${info.label}</option>
+    `).join('');
+
+    const cardClass = needsReconfirm ? 'needs-reconfirm' : 
+      (handleStatus === ANOMALY_STATUS.FALSE_POSITIVE ? 'ignored' : 
+       handleStatus === ANOMALY_STATUS.RESOLVED ? 'resolved' : '');
+
     return `
-      <div class="anomalyCard ${severityClass} ${anomaly.ignored ? 'ignored' : ''}" data-anomaly-id="${anomaly.id}">
+      <div class="anomalyCard ${severityClass} ${cardClass}" data-anomaly-id="${anomaly.id}">
         <div class="anomalyCardHeader">
           <div class="anomalyType">
             <span class="anomalyIcon">${typeIcon}</span>
             <span class="anomalyTypeLabel">${anomaly.typeLabel}</span>
             <span class="anomalySeverity ${severityClass}">${anomaly.severity === 'high' ? '高危' : '中等'}</span>
+            <span class="anomalyStatusTag" style="background: ${statusInfo.bgColor}; color: ${statusInfo.color};">
+              ${needsReconfirm ? '🔄 ' : ''}${statusInfo.label}
+            </span>
           </div>
           <span class="anomalyDate">${anomaly.date}</span>
         </div>
+        ${needsReconfirm ? `
+        <div class="anomalyReconfirmBanner">
+          <span class="reconfirmIcon">🔄</span>
+          <span class="reconfirmText">规则已调整，该异常需要重新确认处理状态</span>
+        </div>
+        ` : ''}
         <div class="anomalyCardBody">
           <p class="anomalyMessage">${escapeHtml(anomaly.message)}</p>
           ${statsHtml}
           <p class="anomalyDetails">${escapeHtml(anomaly.details)}</p>
         </div>
-        <div class="anomalyCardActions">
-          <button class="anomalyBtn locate" data-locate="${anomaly.recordId || ''}" data-date="${anomaly.date || ''}" data-type="${anomaly.type}">
-            ${locateText}
-          </button>
-          <button class="anomalyBtn ignore" data-ignore="${anomaly.id}" data-ignored="${anomaly.ignored}">
-            ${ignoreText}
-          </button>
+        <div class="anomalyHandleSection">
+          <div class="anomalyHandleRow">
+            <label class="anomalyHandleLabel">处理状态：</label>
+            <select class="anomalyStatusSelect" data-anomaly-status="${anomaly.id}">
+              ${statusOptions}
+            </select>
+          </div>
+          <div class="anomalyHandleRow">
+            <label class="anomalyHandleLabel">处理备注：</label>
+            <textarea 
+              class="anomalyNoteInput" 
+              data-anomaly-note="${anomaly.id}" 
+              placeholder="请填写处理备注（可选）..."
+              rows="2"
+            >${escapeHtml(currentNote)}</textarea>
+          </div>
+          ${currentNote ? `
+          <div class="anomalySavedNote">
+            <span class="noteIcon">📝</span>
+            <span class="noteLabel">已有备注：</span>
+            <span class="noteContent">${escapeHtml(currentNote)}</span>
+          </div>
+          ` : ''}
+          <div class="anomalyHandleActions">
+            <button class="anomalyBtn locate" data-locate="${anomaly.recordId || ''}" data-date="${anomaly.date || ''}" data-type="${anomaly.type}">
+              ${locateText}
+            </button>
+            <button class="anomalyBtn save-status" data-save-status="${anomaly.id}">
+              💾 保存状态
+            </button>
+            <button class="anomalyBtn ignore" data-clear-status="${anomaly.id}">
+              🗑️ 清除记录
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -2473,19 +2661,33 @@ function renderAnomalyAlerts() {
     });
   });
 
-  anomalyListContainer.querySelectorAll('[data-ignore]').forEach(btn => {
+  anomalyListContainer.querySelectorAll('[data-save-status]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const anomalyId = btn.dataset.ignore;
-      const isIgnored = btn.dataset.ignored === 'true';
+      const anomalyId = btn.dataset.saveStatus;
+      const selectEl = anomalyListContainer.querySelector(`[data-anomaly-status="${anomalyId}"]`);
+      const noteEl = anomalyListContainer.querySelector(`[data-anomaly-note="${anomalyId}"]`);
+      const newStatus = selectEl.value;
+      const newNote = noteEl.value.trim();
 
-      if (isIgnored) {
-        unignoreAnomaly(anomalyId);
-        showToast('success', '已取消忽略', '该异常提醒已恢复显示');
-      } else {
-        ignoreAnomaly(anomalyId);
-        showToast('success', '已忽略', '刷新页面后该异常将不再显示');
-      }
+      updateAnomalyHandleStatus(anomalyId, newStatus, newNote);
+      generatedSuggestions = [];
       renderAnomalyAlerts();
+      renderSuggestionCenter();
+      const statusLabel = ANOMALY_STATUS_LABELS[newStatus]?.label || newStatus;
+      showToast('success', '已保存', `异常状态已更新为「${statusLabel}」`);
+    });
+  });
+
+  anomalyListContainer.querySelectorAll('[data-clear-status]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const anomalyId = btn.dataset.clearStatus;
+      if (confirm('确定要清除该异常的处理记录吗？清除后将恢复为待处理状态。')) {
+        unignoreAnomaly(anomalyId);
+        generatedSuggestions = [];
+        renderAnomalyAlerts();
+        renderSuggestionCenter();
+        showToast('success', '已清除', '异常处理记录已清除，恢复为待处理状态');
+      }
     });
   });
 }
@@ -3784,13 +3986,34 @@ function getMemberStatsForSuggestions(recentRecords, defaultTariff) {
 function generateAnomalySuggestions(recentRecords) {
   const suggestions = [];
   const anomalies = getAllAnomalies(recentRecords);
-  const activeAnomalies = anomalies.filter(a => !a.ignored);
+  
+  const pendingAnomalies = anomalies.filter(a => 
+    !a.handleStatus || a.handleStatus === ANOMALY_STATUS.PENDING || a.needsReconfirm
+  );
+  const confirmedAnomalies = anomalies.filter(a => a.handleStatus === ANOMALY_STATUS.CONFIRMED);
+  const resolvedAnomalies = anomalies.filter(a => a.handleStatus === ANOMALY_STATUS.RESOLVED);
+  const falsePositiveAnomalies = anomalies.filter(a => a.handleStatus === ANOMALY_STATUS.FALSE_POSITIVE);
+  const needsReconfirmAnomalies = anomalies.filter(a => a.needsReconfirm);
+  
+  const actionableAnomalies = [...pendingAnomalies, ...confirmedAnomalies];
 
-  if (activeAnomalies.length > 0) {
-    const highSeverity = activeAnomalies.filter(a => a.severity === 'high');
-    const totalWasteKwh = activeAnomalies.reduce((s, a) => s + (a.stats?.deviationAmount || 0), 0);
+  if (actionableAnomalies.length > 0) {
+    const highSeverity = actionableAnomalies.filter(a => a.severity === 'high');
+    const totalWasteKwh = actionableAnomalies.reduce((s, a) => s + (a.stats?.deviationAmount || 0), 0);
     const todayPrice = getEffectiveTariffPrice(new Date().toISOString().slice(0, 7));
     const totalWasteCost = totalWasteKwh * todayPrice;
+
+    const statusBreakdown = [];
+    if (pendingAnomalies.length > 0) statusBreakdown.push(`${pendingAnomalies.length}条待处理`);
+    if (confirmedAnomalies.length > 0) statusBreakdown.push(`${confirmedAnomalies.length}条已确认`);
+    if (needsReconfirmAnomalies.length > 0) statusBreakdown.push(`${needsReconfirmAnomalies.length}条需重新确认`);
+    
+    const anomalyDetails = actionableAnomalies.slice(0, 5).map(a => ({
+      id: a.id,
+      message: a.message,
+      handleStatus: a.handleStatus || ANOMALY_STATUS.PENDING,
+      needsReconfirm: a.needsReconfirm
+    }));
 
     suggestions.push({
       id: 'anomaly-fix',
@@ -3798,18 +4021,21 @@ function generateAnomalySuggestions(recentRecords) {
       category: 'anomaly',
       priority: highSeverity.length > 0 ? 'high' : 'medium',
       icon: '⚠️',
-      title: `处理 ${activeAnomalies.length} 条异常用电`,
-      description: `检测到 ${activeAnomalies.length} 条异常用电记录${highSeverity.length > 0 ? `（含 ${highSeverity.length} 条高危）` : ''}，涉及额外耗电约 ${totalWasteKwh.toFixed(2)}kWh（¥${totalWasteCost.toFixed(2)}）。`,
+      title: `处理 ${actionableAnomalies.length} 条异常用电`,
+      description: `检测到 ${actionableAnomalies.length} 条异常用电记录（${statusBreakdown.join('、')}）${highSeverity.length > 0 ? `，含 ${highSeverity.length} 条高危` : ''}，涉及额外耗电约 ${totalWasteKwh.toFixed(2)}kWh（¥${totalWasteCost.toFixed(2)}）。${needsReconfirmAnomalies.length > 0 ? ' ⚠️ 部分异常因规则调整需重新确认。' : ''}`,
       savings: {
         kwh: totalWasteKwh * 0.8,
         cost: totalWasteCost * 0.8
       },
       evidence: [
-        { type: 'stat', label: '异常记录数', value: `${activeAnomalies.length}条` },
-        { type: 'stat', label: '高危异常', value: `${highSeverity.length}条` },
+        { type: 'stat', label: '待处理', value: `${pendingAnomalies.length}条` },
+        { type: 'stat', label: '已确认', value: `${confirmedAnomalies.length}条` },
+        needsReconfirmAnomalies.length > 0 ? { type: 'stat', label: '需重新确认', value: `${needsReconfirmAnomalies.length}条` } : null,
+        { type: 'stat', label: '已解决', value: `${resolvedAnomalies.length}条` },
+        { type: 'stat', label: '误报/忽略', value: `${falsePositiveAnomalies.length}条` },
         { type: 'stat', label: '额外耗电', value: `${totalWasteKwh.toFixed(2)}kWh` },
-        { type: 'anomalies', label: '异常列表', anomalyIds: activeAnomalies.slice(0, 5).map(a => a.id) }
-      ],
+        { type: 'anomalies-detail', label: '异常详情', anomalies: anomalyDetails }
+      ].filter(Boolean),
       action: {
         type: 'navigate',
         text: '查看异常详情',
@@ -4471,6 +4697,22 @@ function renderSuggestionCenter() {
                 }).join('')}
               </div>`;
             }
+            if (ev.type === 'anomalies-detail' && ev.anomalies && ev.anomalies.length > 0) {
+              return `<div class="evidenceAnomalyList">
+                <span class="evidenceRecordsLabel">${escapeHtml(ev.label)}:</span>
+                <div class="anomalyMiniList">
+                  ${ev.anomalies.map(function(anomaly) {
+                    const statusInfo = ANOMALY_STATUS_LABELS[anomaly.handleStatus] || ANOMALY_STATUS_LABELS[ANOMALY_STATUS.PENDING];
+                    return `<div class="anomalyMiniItem ${anomaly.needsReconfirm ? 'needs-reconfirm' : ''}" data-locate-anomaly="${anomaly.id}">
+                      <span class="anomalyMiniStatus" style="background: ${statusInfo.bgColor}; color: ${statusInfo.color};">
+                        ${anomaly.needsReconfirm ? '🔄 ' : ''}${statusInfo.label}
+                      </span>
+                      <span class="anomalyMiniText">${escapeHtml(anomaly.message)}</span>
+                    </div>`;
+                  }).join('')}
+                </div>
+              </div>`;
+            }
             return '';
           }).join('')}
         </div>`
@@ -4524,13 +4766,21 @@ function bindSuggestionEvents() {
     });
   });
 
-  container.querySelectorAll('[data-locate-anomaly]').forEach(btn => {
-    btn.addEventListener('click', function() {
+  container.querySelectorAll('[data-locate-anomaly]').forEach(el => {
+    el.addEventListener('click', function() {
       const anomalyId = this.dataset.locateAnomaly;
       const anomalySection = document.querySelector('#anomalyAlertSection');
       if (anomalySection) {
         anomalySection.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
+      setTimeout(() => {
+        const anomalyCard = document.querySelector(`.anomalyCard[data-anomaly-id="${anomalyId}"]`);
+        if (anomalyCard) {
+          anomalyCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          anomalyCard.classList.add('highlight-row');
+          setTimeout(() => anomalyCard.classList.remove('highlight-row'), 3000);
+        }
+      }, 300);
     });
   });
 

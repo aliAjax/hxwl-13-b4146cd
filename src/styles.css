@@ -1346,6 +1346,235 @@ td button { margin-left: 6px; background: #e4ecff; }
   background: #e5e7eb;
 }
 
+.anomalyBtn.save-status {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.anomalyBtn.save-status:hover {
+  background: #bbf7d0;
+}
+
+.anomalyStatusTag {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
+.anomalyCard.needs-reconfirm {
+  border-left: 4px solid #f59e0b !important;
+  animation: reconfirmPulse 2s ease-in-out infinite;
+}
+
+@keyframes reconfirmPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.2); }
+  50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+}
+
+.anomalyCard.resolved {
+  opacity: 0.75;
+  border-left: 4px solid #16a34a !important;
+}
+
+.anomalyReconfirmBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
+  border-bottom: 1px solid #fde047;
+  font-size: 13px;
+  color: #854d0e;
+}
+
+.anomalyReconfirmBanner .reconfirmIcon {
+  font-size: 16px;
+}
+
+.anomalyHandleSection {
+  padding: 14px 16px;
+  background: #fafcff;
+  border-top: 1px solid #e5ebf5;
+}
+
+.anomalyHandleRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.anomalyHandleRow:last-child {
+  margin-bottom: 0;
+}
+
+.anomalyHandleLabel {
+  min-width: 80px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #5c6982;
+  padding-top: 8px;
+  flex-shrink: 0;
+}
+
+.anomalyStatusSelect {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d5deee;
+  border-radius: 6px;
+  font-size: 13px;
+  background: white;
+  color: #172033;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.anomalyStatusSelect:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.anomalyNoteInput {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d5deee;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  background: white;
+  color: #172033;
+  resize: vertical;
+  min-height: 50px;
+  transition: border-color 0.2s;
+}
+
+.anomalyNoteInput:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.anomalyNoteInput::placeholder {
+  color: #9ca3af;
+}
+
+.anomalySavedNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #f0f9ff;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.anomalySavedNote .noteIcon {
+  flex-shrink: 0;
+}
+
+.anomalySavedNote .noteLabel {
+  font-weight: 500;
+  color: #0369a1;
+  flex-shrink: 0;
+}
+
+.anomalySavedNote .noteContent {
+  color: #1e3a5f;
+  line-height: 1.5;
+}
+
+.anomalyHandleActions {
+  display: flex;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.anomalyHandleActions .anomalyBtn {
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .anomalyHandleRow {
+    flex-direction: column;
+  }
+  
+  .anomalyHandleLabel {
+    padding-top: 0;
+    min-width: auto;
+  }
+  
+  .anomalyHandleActions {
+    flex-direction: column;
+  }
+}
+
+.anomalyStats {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+@media (max-width: 768px) {
+  .anomalyStats {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+}
+
+.evidenceAnomalyList {
+  margin-top: 8px;
+}
+
+.anomalyMiniList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.anomalyMiniItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f8faff;
+  border: 1px solid #e5ebf5;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.anomalyMiniItem:hover {
+  background: #eef4ff;
+  border-color: #bfdbfe;
+  transform: translateX(2px);
+}
+
+.anomalyMiniItem.needs-reconfirm {
+  background: #fefce8;
+  border-color: #fde047;
+}
+
+.anomalyMiniStatus {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.anomalyMiniText {
+  font-size: 13px;
+  color: #172033;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
 .highlight-row {
   background: #fef3c7 !important;
   animation: highlightPulse 0.5s ease-in-out 3;
