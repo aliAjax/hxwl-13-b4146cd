@@ -225,8 +225,8 @@ function migrateTariffEffectivePeriod() {
   );
 
   tariffs.forEach(tariff => {
-    const startMissing = tariff.startMonth === undefined || tariff.startMonth === null;
-    const endMissing = tariff.endMonth === undefined || tariff.endMonth === null;
+    const startMissing = tariff.startMonth === undefined || tariff.startMonth === null || tariff.startMonth === '';
+    const endMissing = tariff.endMonth === undefined || tariff.endMonth === null || tariff.endMonth === '';
 
     if (startMissing) {
       if (hasAnyValidPeriod) {
@@ -2751,8 +2751,14 @@ function renderTariffComparison() {
   const maxCost = Math.max(...results.map(r => r.totalCost));
   const savings = maxCost - minCost;
 
-  const defaultTariff = tariffs.find(t => t.isDefault) || tariffs[0];
-  const defaultResult = results.find(r => r.tariff.id === defaultTariff.id);
+  let defaultResult = results.find(r => r.tariff.isDefault);
+  if (!defaultResult && results.length > 0) {
+    defaultResult = results[0];
+  }
+  if (!defaultResult) {
+    tariffComparisonContainer.innerHTML = '<p class="empty">该月份暂无匹配的电价方案</p>';
+    return;
+  }
 
   const barsHtml = results.map(function(result) {
     const isCheapest = result.totalCost === minCost;
@@ -5560,6 +5566,7 @@ function handleApplyRestore() {
     }
     selectedGoalMonth = goalHistory.length > 0 ? goalHistory[0].month : new Date().toISOString().slice(0, 7);
     tariffs = JSON.parse(localStorage.getItem(tariffKey) || 'null') || tariffSeed;
+    migrateTariffEffectivePeriod();
     slotMapping = JSON.parse(localStorage.getItem(slotMappingKey) || 'null') || slotMappingSeed;
     ignoredAnomalies = JSON.parse(localStorage.getItem(anomalyIgnoreKey) || '[]');
 
