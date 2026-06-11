@@ -1984,7 +1984,7 @@ function renderAnomalyRulesConfig() {
   });
 }
 
-function detectHighSingleUsage() {
+function detectHighSingleUsage(sourceRecords = records) {
   const anomalies = [];
   const rule = anomalyRules.highSingleUsage;
   if (!rule || !rule.enabled) return anomalies;
@@ -1992,7 +1992,7 @@ function detectHighSingleUsage() {
   const sens = ANOMALY_SENSITIVITY_MAP[rule.sensitivity] || ANOMALY_SENSITIVITY_MAP.medium;
   const applianceRecords = new Map();
 
-  records.forEach(record => {
+  sourceRecords.forEach(record => {
     if (!applianceRecords.has(record.appliance)) {
       applianceRecords.set(record.appliance, []);
     }
@@ -2048,7 +2048,7 @@ function detectHighSingleUsage() {
   return anomalies;
 }
 
-function detectDailySpike() {
+function detectDailySpike(sourceRecords = records) {
   const anomalies = [];
   const rule = anomalyRules.dailySpike;
   if (!rule || !rule.enabled) return anomalies;
@@ -2056,7 +2056,7 @@ function detectDailySpike() {
   const sens = ANOMALY_SENSITIVITY_MAP[rule.sensitivity] || ANOMALY_SENSITIVITY_MAP.medium;
   const dailyTotals = new Map();
 
-  records.forEach(record => {
+  sourceRecords.forEach(record => {
     const current = dailyTotals.get(record.date) || 0;
     dailyTotals.set(record.date, current + kwh(record));
   });
@@ -2072,7 +2072,7 @@ function detectDailySpike() {
 
   dailyTotals.forEach((total, date) => {
     if (total > threshold && total > mean * minRatio) {
-      const dayRecords = records.filter(r => r.date === date);
+      const dayRecords = sourceRecords.filter(r => r.date === date);
       const anomalyId = getAnomalyId('daily-spike', null, date);
       if (!showIgnoredAnomalies && isAnomalyIgnored(anomalyId)) return;
 
@@ -2106,7 +2106,7 @@ function detectDailySpike() {
   return anomalies;
 }
 
-function detectAbnormalDuration() {
+function detectAbnormalDuration(sourceRecords = records) {
   const anomalies = [];
   const rule = anomalyRules.abnormalDuration;
   if (!rule || !rule.enabled) return anomalies;
@@ -2114,7 +2114,7 @@ function detectAbnormalDuration() {
   const sens = ANOMALY_SENSITIVITY_MAP[rule.sensitivity] || ANOMALY_SENSITIVITY_MAP.medium;
   const applianceRecords = new Map();
 
-  records.forEach(record => {
+  sourceRecords.forEach(record => {
     if (!applianceRecords.has(record.appliance)) {
       applianceRecords.set(record.appliance, []);
     }
@@ -2169,11 +2169,11 @@ function detectAbnormalDuration() {
   return anomalies;
 }
 
-function getAllAnomalies() {
+function getAllAnomalies(sourceRecords = records) {
   return [
-    ...detectHighSingleUsage(),
-    ...detectDailySpike(),
-    ...detectAbnormalDuration()
+    ...detectHighSingleUsage(sourceRecords),
+    ...detectDailySpike(sourceRecords),
+    ...detectAbnormalDuration(sourceRecords)
   ].sort((a, b) => {
     if (a.severity === 'high' && b.severity !== 'high') return -1;
     if (b.severity === 'high' && a.severity !== 'high') return 1;
@@ -3560,7 +3560,7 @@ function getMemberStatsForSuggestions(recentRecords, defaultTariff) {
 
 function generateAnomalySuggestions(recentRecords) {
   const suggestions = [];
-  const anomalies = getAllAnomalies();
+  const anomalies = getAllAnomalies(recentRecords);
   const activeAnomalies = anomalies.filter(a => !a.ignored);
 
   if (activeAnomalies.length > 0) {
