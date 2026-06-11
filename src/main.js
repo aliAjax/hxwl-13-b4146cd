@@ -2663,17 +2663,43 @@ function minutesToTime(minutes, showDayOffset = true) {
   return timeStr;
 }
 
-function parseForbiddenRanges(ranges) {
+function parseForbiddenRanges(ranges, totalSlots = 96) {
   if (!ranges || ranges.length === 0) return [];
   const slots = [];
+  const DAY_SLOTS = 48;
+
+  function addRange(startSlot, endSlot) {
+    const start = Math.max(0, startSlot);
+    const end = Math.min(totalSlots, endSlot);
+    if (start < end) {
+      slots.push([start, end]);
+    }
+  }
+
   for (const range of ranges) {
     const parts = range.split('-');
     if (parts.length !== 2) continue;
-    const startMin = timeToMinutes(parts[0]);
-    const endMin = timeToMinutes(parts[1]);
+    const startText = parts[0].trim();
+    const endText = parts[1].trim();
+    const startMin = timeToMinutes(startText);
+    const endMin = timeToMinutes(endText);
+    if (!Number.isFinite(startMin) || !Number.isFinite(endMin)) continue;
     const startSlot = Math.floor(startMin / 30);
     const endSlot = Math.ceil(endMin / 30);
-    slots.push([startSlot, endSlot]);
+
+    if (startText.startsWith('+') || endText.startsWith('+')) {
+      addRange(startSlot, endSlot > startSlot ? endSlot : endSlot + DAY_SLOTS);
+      continue;
+    }
+
+    for (let dayStart = 0; dayStart < totalSlots; dayStart += DAY_SLOTS) {
+      if (endSlot > startSlot) {
+        addRange(dayStart + startSlot, dayStart + endSlot);
+      } else {
+        addRange(dayStart + startSlot, dayStart + DAY_SLOTS);
+        addRange(dayStart, dayStart + endSlot);
+      }
+    }
   }
   return slots;
 }
@@ -2741,7 +2767,7 @@ function generateSchedule() {
     const deadlineSlot = Math.ceil(deadlineMinutes / 30);
     const earliestMinutes = timeToMinutes(task.earliestStart || '00:00');
     const earliestSlot = Math.floor(earliestMinutes / 30);
-    const forbiddenSlotRanges = parseForbiddenRanges(task.forbiddenRanges);
+    const forbiddenSlotRanges = parseForbiddenRanges(task.forbiddenRanges, HALF_HOUR_SLOTS);
 
     let bestStart = -1;
     let bestCost = Infinity;
@@ -2876,7 +2902,7 @@ function renderScheduleTaskList() {
     const tariff = task.tariffId ? tariffs.find(t => t.id === task.tariffId) : null;
     const tariffName = tariff ? tariff.name : '默认方案';
     const forbiddenText = (task.forbiddenRanges && task.forbiddenRanges.length > 0)
-      ? task.forbiddenRanges.join(', ')
+      ? escapeHtml(task.forbiddenRanges.join(', '))
       : '<span style="color:#94a3b8;">—</span>';
     return '<tr>' +
       '<td>' + escapeHtml(task.appliance) + '</td>' +
