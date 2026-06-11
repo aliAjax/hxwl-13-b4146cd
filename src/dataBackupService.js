@@ -1,5 +1,5 @@
-const BACKUP_SCHEMA_VERSION = 1;
-const APP_VERSION = '1.0.0';
+const BACKUP_SCHEMA_VERSION = 2;
+const APP_VERSION = '1.1.0';
 
 const STORAGE_KEYS = {
   records: 'hxwl-13-home-energy',
@@ -11,7 +11,9 @@ const STORAGE_KEYS = {
   tariffs: 'hxwl-13-home-energy-tariffs',
   slotMapping: 'hxwl-13-home-energy-slot-mapping',
   ignoredAnomalies: 'hxwl-13-home-energy-anomaly-ignore',
-  anomalyRules: 'hxwl-13-home-energy-anomaly-rules'
+  anomalyRules: 'hxwl-13-home-energy-anomaly-rules',
+  scheduleTasks: 'hxwl-13-home-energy-schedule-tasks',
+  scheduleConfig: 'hxwl-13-home-energy-schedule-config'
 };
 
 const RECORD_UNIQUE_FIELDS = ['date', 'appliance', 'slot', 'hours', 'watts'];
@@ -63,6 +65,28 @@ const VERSION_MIGRATIONS = {
       }));
     }
     return result;
+  },
+  2: (data) => {
+    const result = { ...data };
+    if (!result.scheduleTasks) {
+      result.scheduleTasks = [];
+    }
+    if (!result.scheduleConfig) {
+      result.scheduleConfig = { maxConcurrentPower: 8800 };
+    }
+    if (result.scheduleTasks && Array.isArray(result.scheduleTasks)) {
+      result.scheduleTasks = result.scheduleTasks.map(task => ({
+        id: task.id || crypto.randomUUID(),
+        appliance: task.appliance || '',
+        watts: Number(task.watts) || 0,
+        duration: Number(task.duration) || 0,
+        deadline: task.deadline || '23:59',
+        earliestStart: task.earliestStart || '00:00',
+        forbiddenRanges: task.forbiddenRanges || [],
+        tariffId: task.tariffId || ''
+      }));
+    }
+    return result;
   }
 };
 
@@ -94,7 +118,9 @@ function createBackup(options = {}, sourceData = null) {
     includeTariffs = true,
     includeSlotMapping = true,
     includeIgnoredAnomalies = true,
-    includeAnomalyRules = true
+    includeAnomalyRules = true,
+    includeScheduleTasks = true,
+    includeScheduleConfig = true
   } = options;
 
   const allData = sourceData || getCurrentData();
@@ -110,6 +136,8 @@ function createBackup(options = {}, sourceData = null) {
   if (includeSlotMapping) filteredData.slotMapping = allData.slotMapping ?? null;
   if (includeIgnoredAnomalies) filteredData.ignoredAnomalies = allData.ignoredAnomalies ?? [];
   if (includeAnomalyRules) filteredData.anomalyRules = allData.anomalyRules ?? { ...DEFAULT_ANOMALY_RULES };
+  if (includeScheduleTasks) filteredData.scheduleTasks = allData.scheduleTasks ?? [];
+  if (includeScheduleConfig) filteredData.scheduleConfig = allData.scheduleConfig ?? { maxConcurrentPower: 8800 };
 
   const backup = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -241,7 +269,9 @@ function analyzeDifferences(currentData, importedData) {
     tariffs: { added: 0, updated: 0, skipped: 0, items: [] },
     slotMapping: { action: 'none', different: false },
     ignoredAnomalies: { action: 'none', count: 0 },
-    anomalyRules: { action: 'none', different: false }
+    anomalyRules: { action: 'none', different: false },
+    scheduleTasks: { added: 0, updated: 0, skipped: 0, items: [] },
+    scheduleConfig: { action: 'none', different: false }
   };
 
   if (importedData.records) {
@@ -556,6 +586,77 @@ function analyzeDifferences(currentData, importedData) {
     };
   }
 
+  if (importedData.scheduleTasks && Array.isArray(importedData.scheduleTasks)) {
+    const currentTasks = currentData.scheduleTasks || [];
+    const currentMap = new Map(currentTasks.map(t => [t.id, t]));
+    const applianceMap = new Map(currentTasks.map(t => [t.appliance, t]));
+
+    importedData.scheduleTasks.forEach(imported => {
+      let match = currentMap.get(imported.id);
+      let matchType = 'id';
+
+      if (!match) {
+        match = applianceMap.get(imported.appliance);
+        matchType = 'appliance';
+      }
+
+      if (!match) {
+        analysis.scheduleTasks.added++;
+        analysis.scheduleTasks.items.push({ type: 'add', imported, matchType: null });
+      } else {
+        const differences = [];
+        ['appliance', 'watts', 'duration', 'deadline', 'earliestStart', 'tariffId'].forEach(field => {
+          const cVal = String(match[field] ?? '');
+          const iVal = String(imported[field] ?? '');
+          if (cVal !== iVal) {
+            differences.push({ field, current: match[field], imported: imported[field] });
+          }
+        });
+        const cForbidden = (match.forbiddenRanges || []).join(',');
+        const iForbidden = (imported.forbiddenRanges || []).join(',');
+        if (cForbidden !== iForbidden) {
+          differences.push({ field: 'forbiddenRanges', current: match.forbiddenRanges, imported: imported.forbiddenRanges });
+        }
+
+        if (differences.length > 0) {
+          analysis.scheduleTasks.updated++;
+          analysis.scheduleTasks.items.push({
+            type: 'update',
+            current: match,
+            imported,
+            differences,
+            matchType
+          });
+        } else {
+          analysis.scheduleTasks.skipped++;
+          analysis.scheduleTasks.items.push({
+            type: 'skip',
+            current: match,
+            imported,
+            matchType
+          });
+        }
+      }
+    });
+  }
+
+  if (importedData.scheduleConfig) {
+    const current = currentData.scheduleConfig;
+    const imported = importedData.scheduleConfig;
+    let different = !current;
+
+    if (!different && current && imported) {
+      if ((current.maxConcurrentPower || 8800) !== (imported.maxConcurrentPower || 8800)) {
+        different = true;
+      }
+    }
+
+    analysis.scheduleConfig = {
+      action: different ? 'update' : 'none',
+      different
+    };
+  }
+
   return analysis;
 }
 
@@ -571,6 +672,8 @@ function applyRestore(analysis, importedData, options = {}) {
     includeSlotMapping = true,
     includeIgnoredAnomalies = true,
     includeAnomalyRules = true,
+    includeScheduleTasks = true,
+    includeScheduleConfig = true,
     updateMode = 'skip'
   } = options;
 
@@ -579,7 +682,8 @@ function applyRestore(analysis, importedData, options = {}) {
     records: { added: 0, updated: 0, skipped: 0 },
     appliances: { added: 0, updated: 0, skipped: 0 },
     members: { added: 0, updated: 0, skipped: 0 },
-    tariffs: { added: 0, updated: 0, skipped: 0 }
+    tariffs: { added: 0, updated: 0, skipped: 0 },
+    scheduleTasks: { added: 0, updated: 0, skipped: 0 }
   };
 
   if (includeRecords && analysis.records.items.length > 0) {
@@ -826,6 +930,46 @@ function applyRestore(analysis, importedData, options = {}) {
     if (updateMode === 'overwrite' || updateMode === 'update') {
       if (importedData && importedData.anomalyRules) {
         localStorage.setItem(STORAGE_KEYS.anomalyRules, JSON.stringify(importedData.anomalyRules));
+      }
+    }
+  }
+
+  if (includeScheduleTasks && analysis.scheduleTasks && analysis.scheduleTasks.items && analysis.scheduleTasks.items.length > 0) {
+    const scheduleTasks = [...(currentData.scheduleTasks || [])];
+    const existingIds = new Set(scheduleTasks.map(t => t.id));
+    const existingAppliances = new Map(scheduleTasks.map(t => [t.appliance, t.id]));
+
+    analysis.scheduleTasks.items.forEach(item => {
+      if (item.type === 'add') {
+        let newId = item.imported.id;
+        while (existingIds.has(newId)) {
+          newId = crypto.randomUUID();
+        }
+        scheduleTasks.push({ ...item.imported, id: newId });
+        existingIds.add(newId);
+        stats.scheduleTasks.added++;
+      } else if (item.type === 'update') {
+        if (updateMode === 'overwrite' || updateMode === 'update') {
+          const idx = scheduleTasks.findIndex(t => t.id === item.current.id);
+          if (idx !== -1) {
+            scheduleTasks[idx] = { ...item.imported, id: item.current.id };
+            stats.scheduleTasks.updated++;
+          }
+        } else {
+          stats.scheduleTasks.skipped++;
+        }
+      } else {
+        stats.scheduleTasks.skipped++;
+      }
+    });
+
+    localStorage.setItem(STORAGE_KEYS.scheduleTasks, JSON.stringify(scheduleTasks));
+  }
+
+  if (includeScheduleConfig && analysis.scheduleConfig && analysis.scheduleConfig.different) {
+    if (updateMode === 'overwrite' || updateMode === 'update') {
+      if (importedData && importedData.scheduleConfig) {
+        localStorage.setItem(STORAGE_KEYS.scheduleConfig, JSON.stringify(importedData.scheduleConfig));
       }
     }
   }

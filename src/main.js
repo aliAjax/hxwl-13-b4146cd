@@ -21,6 +21,7 @@ const anomalyIgnoreKey = 'hxwl-13-home-energy-anomaly-ignore';
 const anomalyRulesKey = 'hxwl-13-home-energy-anomaly-rules';
 const scheduleTaskKey = 'hxwl-13-home-energy-schedule-tasks';
 const scheduleResultKey = 'hxwl-13-home-energy-schedule-result';
+const scheduleConfigKey = 'hxwl-13-home-energy-schedule-config';
 
 const ANOMALY_SENSITIVITY_MAP = {
   low:    { stdDevMultiplier: 2.5, minRatioMultiplier: 1.6, label: '低敏感' },
@@ -116,10 +117,14 @@ const slotMappingSeed = {
 };
 
 const scheduleTaskSeed = [
-  { id: crypto.randomUUID(), appliance: '洗衣机', watts: 420, duration: 1, deadline: '18:00', earliestStart: '00:00', tariffId: '' },
-  { id: crypto.randomUUID(), appliance: '电热水器', watts: 1800, duration: 1.5, deadline: '22:00', earliestStart: '00:00', tariffId: '' },
-  { id: crypto.randomUUID(), appliance: '空调预冷', watts: 900, duration: 2, deadline: '19:00', earliestStart: '14:00', tariffId: '' }
+  { id: crypto.randomUUID(), appliance: '洗衣机', watts: 420, duration: 1, deadline: '18:00', earliestStart: '00:00', forbiddenRanges: [], tariffId: '' },
+  { id: crypto.randomUUID(), appliance: '电热水器', watts: 1800, duration: 1.5, deadline: '22:00', earliestStart: '00:00', forbiddenRanges: [], tariffId: '' },
+  { id: crypto.randomUUID(), appliance: '空调预冷', watts: 900, duration: 2, deadline: '19:00', earliestStart: '14:00', forbiddenRanges: [], tariffId: '' },
+  { id: crypto.randomUUID(), appliance: '电动汽车充电', watts: 3500, duration: 6, deadline: '+06:00', earliestStart: '22:00', forbiddenRanges: ['19:00-21:00'], tariffId: '' }
 ];
+const scheduleConfigSeed = {
+  maxConcurrentPower: 8800
+};
 const slotOrder = ['清晨', '上午', '午间', '下午', '午后', '傍晚', '晚间', '深夜', '全天'];
 
 const UNASSIGNED_LABEL = '未分配';
@@ -207,6 +212,7 @@ function migrateIgnoredAnomalies() {
 migrateIgnoredAnomalies();
 let scheduleTasks = JSON.parse(localStorage.getItem(scheduleTaskKey) || 'null') || scheduleTaskSeed;
 let scheduleResult = JSON.parse(localStorage.getItem(scheduleResultKey) || 'null');
+let scheduleConfig = JSON.parse(localStorage.getItem(scheduleConfigKey) || 'null') || scheduleConfigSeed;
 let editingScheduleTaskId = null;
 
 let backupRestoreState = {
@@ -229,7 +235,8 @@ let backupRestoreOptions = {
   includeSlotMapping: true,
   includeIgnoredAnomalies: true,
   includeAnomalyRules: true,
-  includeScheduleTasks: true
+  includeScheduleTasks: true,
+  includeScheduleConfig: true
 };
 
 function getBackupSourceData() {
@@ -243,7 +250,8 @@ function getBackupSourceData() {
     slotMapping,
     ignoredAnomalies,
     anomalyRules,
-    scheduleTasks
+    scheduleTasks,
+    scheduleConfig
   };
 }
 
@@ -598,11 +606,27 @@ document.querySelector('#app').innerHTML = `
       <div class="panelHead">
         <h2>🕐 用电排程优化</h2>
         <div class="scheduleActions">
+          <button id="scheduleConfigBtn" class="primary" style="background:#64748b;">⚙️ 排程配置</button>
           <button id="addScheduleTaskBtn" class="primary">新增排程任务</button>
           <button id="generateScheduleBtn" class="primary">生成建议排程</button>
         </div>
       </div>
-      <p class="scheduleHint">配置可调整的电器任务，系统将根据分时电价自动生成当天最低费用排程</p>
+      <p class="scheduleHint">配置可调整的电器任务，系统将根据分时电价自动生成跨天最低费用排程（支持跨午夜任务与不可运行时段）</p>
+      <div id="scheduleConfigContainer" style="display:none; margin-top:16px;">
+        <div class="scheduleConfigForm">
+          <h3>排程全局配置</h3>
+          <div class="scheduleTaskFormRow">
+            <label>
+              <span>最大同时运行功率 (W)</span>
+              <input type="number" id="maxConcurrentPowerInput" min="1000" step="100" placeholder="例如：8800" required />
+            </label>
+          </div>
+          <div class="scheduleTaskFormRow" style="justify-content:flex-end;">
+            <button type="button" id="cancelScheduleConfigBtn" style="background:#e4ecff; border:0; border-radius:6px; padding:11px 24px;">取消</button>
+            <button type="button" id="saveScheduleConfigBtn" class="primary">保存配置</button>
+          </div>
+        </div>
+      </div>
       <div id="scheduleTaskFormContainer" style="display:none; margin-top:16px;">
         <form id="scheduleTaskForm" class="scheduleTaskForm">
           <h3 id="scheduleTaskFormTitle">新增排程任务</h3>
@@ -622,18 +646,27 @@ document.querySelector('#app').innerHTML = `
               <input name="duration" type="number" min="0.5" step="0.5" placeholder="1" required />
             </label>
             <label>
-              <span>最晚完成时间</span>
-              <input name="deadline" type="time" required />
+              <span>适用电价方案</span>
+              <select name="tariffId" id="scheduleTariffSelect"></select>
             </label>
           </div>
           <div class="scheduleTaskFormRow">
             <label>
-              <span>最早开始时间（可选）</span>
+              <span>最早开始时间</span>
               <input name="earliestStart" type="time" />
+              <small style="font-size:11px;color:#6b7280;">留空则默认为 00:00</small>
             </label>
             <label>
-              <span>适用电价方案</span>
-              <select name="tariffId" id="scheduleTariffSelect"></select>
+              <span>最晚完成时间</span>
+              <input name="deadline" type="text" placeholder="例如：18:00 或 +06:00（次日）" required />
+              <small style="font-size:11px;color:#6b7280;">格式：HH:MM 当天；+HH:MM 次日（跨午夜）</small>
+            </label>
+          </div>
+          <div class="scheduleTaskFormRow">
+            <label style="grid-column: 1 / -1;">
+              <span>禁止运行时间段（多个用逗号分隔）</span>
+              <input name="forbiddenRanges" type="text" placeholder="例如：12:00-14:00,19:00-21:00" />
+              <small style="font-size:11px;color:#6b7280;">格式：HH:MM-HH:MM，任务将避开这些时段运行</small>
             </label>
           </div>
           <div class="scheduleTaskFormRow" style="justify-content:flex-end;">
@@ -649,8 +682,9 @@ document.querySelector('#app').innerHTML = `
               <th>电器</th>
               <th>功率</th>
               <th>时长</th>
-              <th>最晚完成</th>
               <th>最早开始</th>
+              <th>最晚完成</th>
+              <th>禁止运行时段</th>
               <th>电价方案</th>
               <th></th>
             </tr>
@@ -661,7 +695,8 @@ document.querySelector('#app').innerHTML = `
       <div id="scheduleResultSection" style="display:none; margin-top:24px;">
         <div class="panelHead" style="margin-bottom:12px;">
           <h3 style="margin:0;">📋 建议排程方案</h3>
-          <div style="display:flex; gap:8px; align-items:center;">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <span style="font-size:12px; color:#64748b;">当前最大功率限制：<strong id="currentMaxPowerHint">8800W</strong></span>
             <span id="scheduleSavingsHint" style="font-size:13px; color:#16a34a; font-weight:600;"></span>
             <button id="applyScheduleBtn" class="primary" style="background:#16a34a;">转为用电记录</button>
           </div>
@@ -673,6 +708,7 @@ document.querySelector('#app').innerHTML = `
               <th>电器</th>
               <th>建议开始</th>
               <th>建议结束</th>
+              <th>跨天</th>
               <th>时段类型</th>
               <th>耗电</th>
               <th>预估费用</th>
@@ -1660,6 +1696,11 @@ document.querySelector('#cancelScheduleTaskBtn').addEventListener('click', funct
 document.querySelector('#scheduleTaskForm').addEventListener('submit', function(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(this).entries());
+
+  const forbiddenRanges = data.forbiddenRanges
+    ? data.forbiddenRanges.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+    : [];
+
   const item = {
     id: editingScheduleTaskId || crypto.randomUUID(),
     appliance: data.appliance,
@@ -1667,6 +1708,7 @@ document.querySelector('#scheduleTaskForm').addEventListener('submit', function(
     duration: Number(data.duration),
     deadline: data.deadline,
     earliestStart: data.earliestStart || '00:00',
+    forbiddenRanges: forbiddenRanges,
     tariffId: data.tariffId || ''
   };
   scheduleTasks = editingScheduleTaskId
@@ -1680,6 +1722,30 @@ document.querySelector('#scheduleTaskForm').addEventListener('submit', function(
   localStorage.setItem(scheduleTaskKey, JSON.stringify(scheduleTasks));
   renderScheduleTaskList();
   renderScheduleResult();
+});
+
+document.querySelector('#scheduleConfigBtn').addEventListener('click', function() {
+  document.querySelector('#maxConcurrentPowerInput').value = scheduleConfig.maxConcurrentPower;
+  document.querySelector('#scheduleConfigContainer').style.display = 'block';
+});
+
+document.querySelector('#cancelScheduleConfigBtn').addEventListener('click', function() {
+  document.querySelector('#scheduleConfigContainer').style.display = 'none';
+});
+
+document.querySelector('#saveScheduleConfigBtn').addEventListener('click', function() {
+  const maxPower = Number(document.querySelector('#maxConcurrentPowerInput').value);
+  if (!maxPower || maxPower < 1000) {
+    showToast('error', '配置无效', '最大同时运行功率不能小于1000W');
+    return;
+  }
+  scheduleConfig.maxConcurrentPower = maxPower;
+  localStorage.setItem(scheduleConfigKey, JSON.stringify(scheduleConfig));
+  document.querySelector('#scheduleConfigContainer').style.display = 'none';
+  scheduleResult = null;
+  localStorage.setItem(scheduleResultKey, JSON.stringify(null));
+  renderScheduleResult();
+  showToast('success', '配置已保存', `最大同时运行功率已设为 ${maxPower}W`);
 });
 
 document.querySelector('#generateScheduleBtn').addEventListener('click', generateSchedule);
@@ -2578,19 +2644,52 @@ function renderTariffDetail() {
 
 function timeToMinutes(timeStr) {
   if (!timeStr) return 0;
-  const parts = timeStr.split(':');
-  return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  const isNextDay = timeStr.startsWith('+');
+  const cleanStr = isNextDay ? timeStr.slice(1) : timeStr;
+  const parts = cleanStr.split(':');
+  const minutes = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  return minutes + (isNextDay ? 1440 : 0);
 }
 
-function minutesToTime(minutes) {
+function minutesToTime(minutes, showDayOffset = true) {
+  const dayOffset = Math.floor(minutes / 1440);
   const m = ((minutes % 1440) + 1440) % 1440;
   const h = Math.floor(m / 60);
   const min = m % 60;
-  return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+  const timeStr = String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+  if (showDayOffset && dayOffset > 0) {
+    return '(+' + dayOffset + '日)' + timeStr;
+  }
+  return timeStr;
+}
+
+function parseForbiddenRanges(ranges) {
+  if (!ranges || ranges.length === 0) return [];
+  const slots = [];
+  for (const range of ranges) {
+    const parts = range.split('-');
+    if (parts.length !== 2) continue;
+    const startMin = timeToMinutes(parts[0]);
+    const endMin = timeToMinutes(parts[1]);
+    const startSlot = Math.floor(startMin / 30);
+    const endSlot = Math.ceil(endMin / 30);
+    slots.push([startSlot, endSlot]);
+  }
+  return slots;
+}
+
+function isSlotForbidden(slot, forbiddenSlotRanges) {
+  for (const [start, end] of forbiddenSlotRanges) {
+    if (slot >= start && slot < end) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function getHourTier(halfHourIndex, tariff) {
-  const hourStart = halfHourIndex / 2;
+  const idx = halfHourIndex % 48;
+  const hourStart = idx / 2;
   const hh = Math.floor(hourStart);
   const mm = (hourStart % 1) * 60;
   const timeStr = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
@@ -2621,8 +2720,8 @@ function generateSchedule() {
     return;
   }
 
-  const HALF_HOUR_SLOTS = 48;
-  const MAX_HOUSEHOLD_POWER = 8800;
+  const HALF_HOUR_SLOTS = 96;
+  const MAX_HOUSEHOLD_POWER = scheduleConfig.maxConcurrentPower || 8800;
   const powerUsage = new Array(HALF_HOUR_SLOTS).fill(0);
 
   const sortedTasks = [...scheduleTasks].sort((a, b) => {
@@ -2638,16 +2737,20 @@ function generateSchedule() {
     const tariff = task.tariffId ? tariffs.find(t => t.id === task.tariffId) : defaultTariff;
     const effectiveTariff = tariff || defaultTariff;
     const durationSlots = Math.ceil(task.duration * 2);
-    const deadlineSlot = Math.ceil(timeToMinutes(task.deadline) / 30);
-    const earliestSlot = Math.floor(timeToMinutes(task.earliestStart || '00:00') / 30);
+    const deadlineMinutes = timeToMinutes(task.deadline);
+    const deadlineSlot = Math.ceil(deadlineMinutes / 30);
+    const earliestMinutes = timeToMinutes(task.earliestStart || '00:00');
+    const earliestSlot = Math.floor(earliestMinutes / 30);
+    const forbiddenSlotRanges = parseForbiddenRanges(task.forbiddenRanges);
 
     let bestStart = -1;
     let bestCost = Infinity;
 
-    for (let start = earliestSlot; start + durationSlots <= Math.min(deadlineSlot, HALF_HOUR_SLOTS); start++) {
+    const searchEnd = Math.min(deadlineSlot, HALF_HOUR_SLOTS);
+    for (let start = earliestSlot; start + durationSlots <= searchEnd; start++) {
       let canPlace = true;
       for (let s = start; s < start + durationSlots; s++) {
-        if (powerUsage[s] + task.watts > MAX_HOUSEHOLD_POWER) {
+        if (isSlotForbidden(s, forbiddenSlotRanges) || powerUsage[s] + task.watts > MAX_HOUSEHOLD_POWER) {
           canPlace = false;
           break;
         }
@@ -2674,19 +2777,29 @@ function generateSchedule() {
         tariff: effectiveTariff,
         startSlot: -1,
         endSlot: -1,
+        startDay: 0,
+        endDay: 0,
+        crossesMidnight: false,
         cost: 0,
         kwh: (task.watts / 1000) * task.duration,
-        error: '无法在约束范围内排程（总功率超限或时间冲突）'
+        error: '无法在约束范围内排程（请检查：功率限制、时间窗口、禁止时段）'
       });
     } else {
       for (let s = bestStart; s < bestStart + durationSlots; s++) {
         powerUsage[s] += task.watts;
       }
+      const endSlot = bestStart + durationSlots;
+      const startDay = bestStart >= 48 ? 1 : 0;
+      const endDay = endSlot > 48 ? 1 : 0;
+      const crossesMidnight = bestStart < 48 && endSlot > 48;
       placements.push({
         task,
         tariff: effectiveTariff,
         startSlot: bestStart,
-        endSlot: bestStart + durationSlots,
+        endSlot: endSlot,
+        startDay: startDay,
+        endDay: endDay,
+        crossesMidnight: crossesMidnight,
         cost: bestCost,
         kwh: (task.watts / 1000) * task.duration
       });
@@ -2698,9 +2811,10 @@ function generateSchedule() {
     const tariff = task.tariffId ? tariffs.find(t => t.id === task.tariffId) : defaultTariff;
     const effectiveTariff = tariff || defaultTariff;
     const durationSlots = Math.ceil(task.duration * 2);
-    const earliestSlot = Math.floor(timeToMinutes(task.earliestStart || '00:00') / 30);
+    const earliestMinutes = timeToMinutes(task.earliestStart || '00:00');
+    const earliestSlot = Math.floor(earliestMinutes / 30);
     let cost = 0;
-    for (let s = earliestSlot; s < earliestSlot + durationSlots && s < 48; s++) {
+    for (let s = earliestSlot; s < earliestSlot + durationSlots && s < HALF_HOUR_SLOTS; s++) {
       const tier = getHourTier(s, effectiveTariff);
       const price = getTierPrice(effectiveTariff, tier);
       cost += (task.watts / 1000) * 0.5 * price;
@@ -2711,8 +2825,13 @@ function generateSchedule() {
   const optimizedCost = placements.reduce((sum, p) => sum + p.cost, 0);
   const savings = naiveCost - optimizedCost;
 
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
   scheduleResult = {
-    date: new Date().toISOString().slice(0, 10),
+    startDate: today.toISOString().slice(0, 10),
+    endDate: tomorrow.toISOString().slice(0, 10),
     placements,
     totalCost: optimizedCost,
     totalKwh: placements.reduce((sum, p) => sum + p.kwh, 0),
@@ -2724,11 +2843,11 @@ function generateSchedule() {
   renderScheduleResult();
 
   if (!feasible) {
-    showToast('warning', '排程不完全可行', '部分任务无法在约束范围内排程，请检查时间约束');
+    showToast('warning', '排程不完全可行', '部分任务无法在约束范围内排程，请检查：功率限制、时间窗口、禁止时段');
   } else if (savings > 0.01) {
     showToast('success', '排程已生成', `优化后预计节省 ¥${savings.toFixed(2)}`);
   } else {
-    showToast('success', '排程已生成', '已生成当天建议排程');
+    showToast('success', '排程已生成', '已生成跨天建议排程');
   }
 }
 
@@ -2749,19 +2868,23 @@ function getSlotNameForTime(timeStr) {
 function renderScheduleTaskList() {
   const tbody = document.querySelector('#scheduleTaskRows');
   if (scheduleTasks.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">暂无排程任务，请点击「新增排程任务」添加</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">暂无排程任务，请点击「新增排程任务」添加</td></tr>';
     return;
   }
 
   tbody.innerHTML = scheduleTasks.map(function(task) {
     const tariff = task.tariffId ? tariffs.find(t => t.id === task.tariffId) : null;
     const tariffName = tariff ? tariff.name : '默认方案';
+    const forbiddenText = (task.forbiddenRanges && task.forbiddenRanges.length > 0)
+      ? task.forbiddenRanges.join(', ')
+      : '<span style="color:#94a3b8;">—</span>';
     return '<tr>' +
       '<td>' + escapeHtml(task.appliance) + '</td>' +
       '<td>' + task.watts + 'W</td>' +
       '<td>' + task.duration + 'h</td>' +
-      '<td>' + escapeHtml(task.deadline) + '</td>' +
       '<td>' + escapeHtml(task.earliestStart || '00:00') + '</td>' +
+      '<td>' + escapeHtml(task.deadline) + '</td>' +
+      '<td>' + forbiddenText + '</td>' +
       '<td>' + escapeHtml(tariffName) + '</td>' +
       '<td>' +
         '<button data-edit-schedule-task="' + task.id + '">编辑</button>' +
@@ -2793,6 +2916,9 @@ function renderScheduleTaskList() {
       form.elements.duration.value = task.duration;
       form.elements.deadline.value = task.deadline;
       form.elements.earliestStart.value = task.earliestStart || '';
+      form.elements.forbiddenRanges.value = (task.forbiddenRanges && task.forbiddenRanges.length > 0)
+        ? task.forbiddenRanges.join(', ')
+        : '';
       form.elements.tariffId.value = task.tariffId || '';
       document.querySelector('#scheduleTaskFormContainer').style.display = 'block';
     });
@@ -2814,6 +2940,11 @@ function renderScheduleResult() {
     savingsHint.textContent = '';
   }
 
+  const maxPowerHint = document.querySelector('#currentMaxPowerHint');
+  if (maxPowerHint) {
+    maxPowerHint.textContent = (scheduleConfig.maxConcurrentPower || 8800) + 'W';
+  }
+
   renderScheduleTimeline();
   renderScheduleResultTable();
 }
@@ -2822,7 +2953,7 @@ function renderScheduleTimeline() {
   const container = document.querySelector('#scheduleTimelineContainer');
   if (!scheduleResult || !scheduleResult.placements) return;
 
-  const HALF_HOUR_SLOTS = 48;
+  const HALF_HOUR_SLOTS = 96;
   const colors = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2', '#be185d'];
   const BAR_HEIGHT = 28;
   const TRACK_GAP = 4;
@@ -2848,13 +2979,25 @@ function renderScheduleTimeline() {
   });
 
   const totalHeight = tracks.length * (BAR_HEIGHT + TRACK_GAP);
+  const startDate = scheduleResult.startDate || '';
+  const endDate = scheduleResult.endDate || '';
 
-  let html = '<div class="scheduleTimeline">';
+  let html = '<div class="scheduleTimeline scheduleTimelineTwoDay">';
+
+  html += '<div class="scheduleDayLabels">';
+  html += '<span class="dayLabel day1">今日 ' + startDate + '</span>';
+  html += '<span class="dayLabel day2">明日 ' + endDate + '</span>';
+  html += '</div>';
+
   html += '<div class="scheduleTimeAxis">';
-  for (let h = 0; h < 24; h += 3) {
-    html += '<span class="timeTick" style="left:' + (h / 24 * 100) + '%;">' + String(h).padStart(2, '0') + ':00</span>';
+  for (let h = 0; h < 48; h += 6) {
+    const displayH = h % 24;
+    html += '<span class="timeTick" style="left:' + (h / 48 * 100) + '%;">' + String(displayH).padStart(2, '0') + ':00</span>';
   }
   html += '</div>';
+
+  html += '<div class="midnightDivider" style="left: 50%;"></div>';
+
   html += '<div class="scheduleBarTrack" style="height:' + totalHeight + 'px;">';
 
   tracks.forEach((track, trackIdx) => {
@@ -2862,7 +3005,8 @@ function renderScheduleTimeline() {
     track.forEach(placement => {
       const leftPct = (placement.startSlot / HALF_HOUR_SLOTS * 100).toFixed(2);
       const widthPct = ((placement.endSlot - placement.startSlot) / HALF_HOUR_SLOTS * 100).toFixed(2);
-      html += '<div class="scheduleBar" style="left:' + leftPct + '%; width:' + widthPct + '%; top:' + topOffset + 'px; height:' + BAR_HEIGHT + 'px; background:' + placement.color + ';">' +
+      const crossClass = placement.crossesMidnight ? ' scheduleBarCross' : '';
+      html += '<div class="scheduleBar' + crossClass + '" style="left:' + leftPct + '%; width:' + widthPct + '%; top:' + topOffset + 'px; height:' + BAR_HEIGHT + 'px; background:' + placement.color + ';">' +
         '<span class="scheduleBarLabel">' + escapeHtml(placement.task.appliance) + '</span>' +
       '</div>';
     });
@@ -2880,22 +3024,26 @@ function renderScheduleResultTable() {
     if (placement.startSlot < 0) {
       return '<tr style="background:#fef2f2;">' +
         '<td>' + escapeHtml(placement.task.appliance) + '</td>' +
-        '<td colspan="3" style="color:#dc2626;">' + escapeHtml(placement.error) + '</td>' +
+        '<td colspan="4" style="color:#dc2626;">' + escapeHtml(placement.error) + '</td>' +
         '<td>' + placement.kwh.toFixed(2) + 'kWh</td>' +
         '<td>--</td>' +
       '</tr>';
     }
 
-    const startTime = minutesToTime(placement.startSlot * 30);
-    const endTime = minutesToTime(placement.endSlot * 30);
+    const startTime = minutesToTime(placement.startSlot * 30, true);
+    const endTime = minutesToTime(placement.endSlot * 30, true);
     const tier = getHourTier(placement.startSlot, placement.tariff);
     const tierName = getTierName(tier);
     const tierColor = getTierColor(tier);
+    const crossBadge = placement.crossesMidnight
+      ? '<span class="crossBadge" title="跨越午夜">跨午夜</span>'
+      : (placement.startDay > 0 ? '<span class="crossBadge" style="background:#64748b;">次日</span>' : '<span style="color:#94a3b8;">—</span>');
 
     return '<tr>' +
       '<td>' + escapeHtml(placement.task.appliance) + '</td>' +
       '<td>' + startTime + '</td>' +
       '<td>' + endTime + '</td>' +
+      '<td>' + crossBadge + '</td>' +
       '<td><span class="tierBadge" style="background: ' + tierColor + '20; color: ' + tierColor + ';">' + tierName + '</span></td>' +
       '<td>' + placement.kwh.toFixed(2) + 'kWh</td>' +
       '<td><strong>¥' + placement.cost.toFixed(2) + '</strong></td>' +
@@ -2914,33 +3062,93 @@ function renderScheduleTariffSelect() {
 function applyScheduleToRecords() {
   if (!scheduleResult || !scheduleResult.placements) return;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = scheduleResult.startDate || new Date().toISOString().slice(0, 10);
+  let tomorrowDate = new Date(today);
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = tomorrowDate.toISOString().slice(0, 10);
   let addedCount = 0;
 
   scheduleResult.placements.forEach(function(placement) {
     if (placement.startSlot < 0) return;
 
-    const startTime = minutesToTime(placement.startSlot * 30);
-    const slotName = getSlotNameForTime(startTime);
+    const MIDNIGHT_SLOT = 48;
+    const startSlot = placement.startSlot;
+    const endSlot = placement.endSlot;
 
-    const newRecord = {
-      id: crypto.randomUUID(),
-      appliance: placement.task.appliance,
-      date: today,
-      slot: slotName,
-      hours: placement.task.duration,
-      watts: placement.task.watts,
-      note: '排程优化自动生成',
-      member: ''
-    };
+    const recordsToAdd = [];
 
-    records.unshift(newRecord);
-    addedCount++;
+    if (startSlot < MIDNIGHT_SLOT && endSlot > MIDNIGHT_SLOT) {
+      const day1Slots = MIDNIGHT_SLOT - startSlot;
+      const day2Slots = endSlot - MIDNIGHT_SLOT;
+      const day1Hours = day1Slots * 0.5;
+      const day2Hours = day2Slots * 0.5;
+      const totalHours = placement.task.duration;
+
+      const day1Ratio = day1Hours / (day1Hours + day2Hours);
+      const day2Ratio = 1 - day1Ratio;
+      const day1Kwh = (placement.task.watts / 1000) * day1Hours;
+      const day2Kwh = (placement.task.watts / 1000) * day2Hours;
+      const ratioSum = day1Ratio + day2Ratio;
+
+      const day1StartTime = minutesToTime(startSlot * 30, false);
+      const day1SlotName = getSlotNameForTime(day1StartTime);
+
+      const day2StartTime = '00:00';
+      const day2SlotName = '深夜';
+
+      recordsToAdd.push({
+        id: crypto.randomUUID(),
+        appliance: placement.task.appliance,
+        date: today,
+        slot: day1SlotName,
+        hours: Number(day1Hours.toFixed(2)),
+        watts: placement.task.watts,
+        note: '排程优化自动生成（跨午夜，第1/2部分，共' + totalHours + 'h）',
+        member: '',
+        _scheduleKwh: Number(day1Kwh.toFixed(4))
+      });
+
+      recordsToAdd.push({
+        id: crypto.randomUUID(),
+        appliance: placement.task.appliance,
+        date: tomorrow,
+        slot: day2SlotName,
+        hours: Number(day2Hours.toFixed(2)),
+        watts: placement.task.watts,
+        note: '排程优化自动生成（跨午夜，第2/2部分，共' + totalHours + 'h）',
+        member: '',
+        _scheduleKwh: Number(day2Kwh.toFixed(4))
+      });
+    } else {
+      const isDay2 = startSlot >= MIDNIGHT_SLOT;
+      const dateStr = isDay2 ? tomorrow : today;
+      const displayStartSlot = isDay2 ? startSlot - MIDNIGHT_SLOT : startSlot;
+      const startTime = minutesToTime(displayStartSlot * 30, false);
+      const slotName = getSlotNameForTime(startTime);
+
+      recordsToAdd.push({
+        id: crypto.randomUUID(),
+        appliance: placement.task.appliance,
+        date: dateStr,
+        slot: slotName,
+        hours: placement.task.duration,
+        watts: placement.task.watts,
+        note: '排程优化自动生成' + (isDay2 ? '（次日运行）' : ''),
+        member: '',
+        _scheduleKwh: placement.kwh
+      });
+    }
+
+    recordsToAdd.forEach(r => {
+      delete r._scheduleKwh;
+      records.unshift(r);
+      addedCount++;
+    });
   });
 
   save();
   render();
-  showToast('success', '已转为用电记录', addedCount + ' 条排程任务已转为用电记录');
+  showToast('success', '已转为用电记录', addedCount + ' 条排程任务已转为用电记录' + (addedCount > scheduleResult.placements.filter(p => p.startSlot >= 0).length ? '（跨午夜任务已拆分）' : ''));
 
   scheduleResult = null;
   localStorage.setItem(scheduleResultKey, JSON.stringify(null));
