@@ -90,11 +90,12 @@ const VERSION_MIGRATIONS = {
   },
   3: (data) => {
     const result = { ...data };
+    const currentMonth = new Date().toISOString().slice(0, 7);
     if (result.tariffs && Array.isArray(result.tariffs)) {
       result.tariffs = result.tariffs.map(tariff => ({
         ...tariff,
-        startMonth: tariff.startMonth !== undefined ? tariff.startMonth : '',
-        endMonth: tariff.endMonth !== undefined ? tariff.endMonth : ''
+        startMonth: tariff.startMonth !== undefined && tariff.startMonth !== null ? tariff.startMonth : currentMonth,
+        endMonth: tariff.endMonth !== undefined && tariff.endMonth !== null ? tariff.endMonth : ''
       }));
     }
     return result;

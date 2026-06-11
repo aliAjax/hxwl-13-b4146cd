@@ -225,8 +225,8 @@ function migrateTariffEffectivePeriod() {
   );
 
   tariffs.forEach(tariff => {
-    const startMissing = tariff.startMonth === undefined || tariff.startMonth === null || tariff.startMonth === '';
-    const endMissing = tariff.endMonth === undefined || tariff.endMonth === null || tariff.endMonth === '';
+    const startMissing = tariff.startMonth === undefined || tariff.startMonth === null;
+    const endMissing = tariff.endMonth === undefined || tariff.endMonth === null;
 
     if (startMissing) {
       if (hasAnyValidPeriod) {
