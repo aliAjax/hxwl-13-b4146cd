@@ -100,6 +100,16 @@ const slotOrder = ['清晨', '上午', '午间', '下午', '午后', '傍晚', '
 
 const UNASSIGNED_LABEL = '未分配';
 
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function getMemberName(record) {
   return record.member || record.member === '' ? (record.member || UNASSIGNED_LABEL) : UNASSIGNED_LABEL;
 }
@@ -1855,8 +1865,8 @@ function renderAnomalyAlerts() {
           <span class="anomalyDate">${anomaly.date}</span>
         </div>
         <div class="anomalyCardBody">
-          <p class="anomalyMessage">${anomaly.message}</p>
-          <p class="anomalyDetails">${anomaly.details}</p>
+          <p class="anomalyMessage">${escapeHtml(anomaly.message)}</p>
+          <p class="anomalyDetails">${escapeHtml(anomaly.details)}</p>
         </div>
         <div class="anomalyCardActions">
           <button class="anomalyBtn locate" data-locate="${anomaly.recordId || ''}" data-date="${anomaly.date || ''}" data-type="${anomaly.type}">
@@ -2001,8 +2011,8 @@ function renderMappingConfig() {
   mappingGrid.innerHTML = slots.map(function(slot) {
     const mappedTier = getSlotTier(slot);
     return '<div class="mappingItem">' +
-      '<span class="mappingSlot">' + slot + '</span>' +
-      '<select data-slot="' + slot + '">' +
+      '<span class="mappingSlot">' + escapeHtml(slot) + '</span>' +
+      '<select data-slot="' + escapeHtml(slot) + '">' +
         '<option value="peak" ' + (mappedTier === 'peak' ? 'selected' : '') + '>峰时段</option>' +
         '<option value="flat" ' + (mappedTier === 'flat' ? 'selected' : '') + '>平时段</option>' +
         '<option value="valley" ' + (mappedTier === 'valley' ? 'selected' : '') + '>谷时段</option>' +
@@ -2021,7 +2031,7 @@ function renderTariffList() {
     return '<div class="tariffCard ' + (tariff.isDefault ? 'default' : '') + '">' +
       '<div class="tariffCardHeader">' +
         '<div class="tariffCardTitle">' +
-          '<h4>' + tariff.name + '</h4>' +
+          '<h4>' + escapeHtml(tariff.name) + '</h4>' +
           (tariff.isDefault ? '<span class="defaultBadge">默认</span>' : '') +
         '</div>' +
         '<div class="tariffCardActions">' +
@@ -2033,17 +2043,17 @@ function renderTariffList() {
         '<div class="tariffPrice peak">' +
           '<span class="tierLabel">峰</span>' +
           '<span class="tierPrice">¥' + tariff.peakPrice.toFixed(2) + '/kWh</span>' +
-          '<span class="tierHours">' + tariff.peakHours.join('、') + '</span>' +
+          '<span class="tierHours">' + escapeHtml(tariff.peakHours.join('、')) + '</span>' +
         '</div>' +
         '<div class="tariffPrice flat">' +
           '<span class="tierLabel">平</span>' +
           '<span class="tierPrice">¥' + tariff.flatPrice.toFixed(2) + '/kWh</span>' +
-          '<span class="tierHours">' + tariff.flatHours.join('、') + '</span>' +
+          '<span class="tierHours">' + escapeHtml(tariff.flatHours.join('、')) + '</span>' +
         '</div>' +
         '<div class="tariffPrice valley">' +
           '<span class="tierLabel">谷</span>' +
           '<span class="tierPrice">¥' + tariff.valleyPrice.toFixed(2) + '/kWh</span>' +
-          '<span class="tierHours">' + tariff.valleyHours.join('、') + '</span>' +
+          '<span class="tierHours">' + escapeHtml(tariff.valleyHours.join('、')) + '</span>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -2080,7 +2090,7 @@ function renderTariffList() {
 
 function renderTariffSelects() {
   const options = tariffs.map(function(t) {
-    return '<option value="' + t.id + '">' + t.name + (t.isDefault ? ' (默认)' : '') + '</option>';
+    return '<option value="' + t.id + '">' + escapeHtml(t.name) + (t.isDefault ? ' (默认)' : '') + '</option>';
   }).join('');
   detailTariffSelect.innerHTML = options;
 
@@ -2124,7 +2134,7 @@ function renderTariffComparison() {
     let barHtml = '<div class="comparisonBar ' + (isCheapest ? 'cheapest' : '') + ' ' + (isDefault ? 'isDefault' : '') + '">' +
       '<div class="comparisonBarHeader">' +
         '<span class="comparisonBarName">' +
-          result.tariff.name +
+          escapeHtml(result.tariff.name) +
           (isDefault ? '<span class="defaultBadge">默认</span>' : '') +
           (isCheapest ? '<span class="cheapestBadge">最省</span>' : '') +
         '</span>' +
@@ -2207,8 +2217,8 @@ function renderTariffDetail() {
       const tierColor = getTierColor(result.tier);
       return '<tr>' +
         '<td>' + record.date + '</td>' +
-        '<td>' + record.appliance + '</td>' +
-        '<td>' + record.slot + '</td>' +
+        '<td>' + escapeHtml(record.appliance) + '</td>' +
+        '<td>' + escapeHtml(record.slot) + '</td>' +
         '<td><span class="tierBadge" style="background: ' + tierColor + '20; color: ' + tierColor + ';">' + tierName + '</span></td>' +
         '<td>' + result.kwh.toFixed(2) + 'kWh</td>' +
         '<td>¥' + result.price.toFixed(2) + '/kWh</td>' +
@@ -2398,12 +2408,12 @@ function renderScheduleTaskList() {
     const tariff = task.tariffId ? tariffs.find(t => t.id === task.tariffId) : null;
     const tariffName = tariff ? tariff.name : '默认方案';
     return '<tr>' +
-      '<td>' + task.appliance + '</td>' +
+      '<td>' + escapeHtml(task.appliance) + '</td>' +
       '<td>' + task.watts + 'W</td>' +
       '<td>' + task.duration + 'h</td>' +
-      '<td>' + task.deadline + '</td>' +
-      '<td>' + (task.earliestStart || '00:00') + '</td>' +
-      '<td>' + tariffName + '</td>' +
+      '<td>' + escapeHtml(task.deadline) + '</td>' +
+      '<td>' + escapeHtml(task.earliestStart || '00:00') + '</td>' +
+      '<td>' + escapeHtml(tariffName) + '</td>' +
       '<td>' +
         '<button data-edit-schedule-task="' + task.id + '">编辑</button>' +
         '<button data-del-schedule-task="' + task.id + '" style="background:#fee2e2; color:#dc2626;">删除</button>' +
@@ -2504,7 +2514,7 @@ function renderScheduleTimeline() {
       const leftPct = (placement.startSlot / HALF_HOUR_SLOTS * 100).toFixed(2);
       const widthPct = ((placement.endSlot - placement.startSlot) / HALF_HOUR_SLOTS * 100).toFixed(2);
       html += '<div class="scheduleBar" style="left:' + leftPct + '%; width:' + widthPct + '%; top:' + topOffset + 'px; height:' + BAR_HEIGHT + 'px; background:' + placement.color + ';">' +
-        '<span class="scheduleBarLabel">' + placement.task.appliance + '</span>' +
+        '<span class="scheduleBarLabel">' + escapeHtml(placement.task.appliance) + '</span>' +
       '</div>';
     });
   });
@@ -2520,8 +2530,8 @@ function renderScheduleResultTable() {
   tbody.innerHTML = scheduleResult.placements.map(function(placement) {
     if (placement.startSlot < 0) {
       return '<tr style="background:#fef2f2;">' +
-        '<td>' + placement.task.appliance + '</td>' +
-        '<td colspan="3" style="color:#dc2626;">' + placement.error + '</td>' +
+        '<td>' + escapeHtml(placement.task.appliance) + '</td>' +
+        '<td colspan="3" style="color:#dc2626;">' + escapeHtml(placement.error) + '</td>' +
         '<td>' + placement.kwh.toFixed(2) + 'kWh</td>' +
         '<td>--</td>' +
       '</tr>';
@@ -2534,7 +2544,7 @@ function renderScheduleResultTable() {
     const tierColor = getTierColor(tier);
 
     return '<tr>' +
-      '<td>' + placement.task.appliance + '</td>' +
+      '<td>' + escapeHtml(placement.task.appliance) + '</td>' +
       '<td>' + startTime + '</td>' +
       '<td>' + endTime + '</td>' +
       '<td><span class="tierBadge" style="background: ' + tierColor + '20; color: ' + tierColor + ';">' + tierName + '</span></td>' +
@@ -2601,8 +2611,8 @@ function showToast(type, title, message, duration = 4000) {
   toast.innerHTML = 
     '<span class="toastIcon">' + (icons[type] || icons.info) + '</span>' +
     '<div class="toastContent">' +
-      '<p class="toastTitle">' + title + '</p>' +
-      '<p class="toastMessage">' + message + '</p>' +
+      '<p class="toastTitle">' + escapeHtml(title) + '</p>' +
+      '<p class="toastMessage">' + escapeHtml(message) + '</p>' +
     '</div>' +
     '<button class="toastClose" aria-label="关闭">×</button>';
 
@@ -2631,32 +2641,65 @@ function hideToast(toast) {
 function showConfirmDialog(options) {
   const { title, message, icon = '📦', details = [], confirmText = '确认', cancelText = '取消', onConfirm, onCancel } = options;
 
-  const detailsHtml = details.length > 0 ? `
-    <div class="confirmModalDetails">
-      ${details.map(d => `<div><strong>${d.label}：</strong>${d.value}</div>`).join('')}
-    </div>
-  ` : '';
+  confirmModal.replaceChildren();
 
-  confirmModal.innerHTML = `
-    <div class="confirmModalHeader">
-      <span class="confirmModalIcon">${icon}</span>
-      <div style="flex: 1;">
-        <h3 class="confirmModalTitle">${title}</h3>
-        <p class="confirmModalMessage">${message}</p>
-      </div>
-    </div>
-    ${detailsHtml}
-    <div class="confirmModalActions">
-      <button class="confirmModalBtnSecondary" id="confirmModalCancelBtn">${cancelText}</button>
-      <button class="confirmModalBtnPrimary" id="confirmModalConfirmBtn">${confirmText}</button>
-    </div>
-  `;
+  const header = document.createElement('div');
+  header.className = 'confirmModalHeader';
+
+  const iconEl = document.createElement('span');
+  iconEl.className = 'confirmModalIcon';
+  iconEl.textContent = icon;
+
+  const content = document.createElement('div');
+  content.style.flex = '1';
+
+  const titleEl = document.createElement('h3');
+  titleEl.className = 'confirmModalTitle';
+  titleEl.textContent = title;
+
+  const messageEl = document.createElement('p');
+  messageEl.className = 'confirmModalMessage';
+  messageEl.textContent = message;
+
+  content.append(titleEl, messageEl);
+  header.append(iconEl, content);
+  confirmModal.appendChild(header);
+
+  if (details.length > 0) {
+    const detailsEl = document.createElement('div');
+    detailsEl.className = 'confirmModalDetails';
+
+    details.forEach((detail) => {
+      const detailRow = document.createElement('div');
+      const label = document.createElement('strong');
+      label.textContent = `${detail.label}：`;
+      detailRow.append(label, document.createTextNode(detail.value));
+      detailsEl.appendChild(detailRow);
+    });
+
+    confirmModal.appendChild(detailsEl);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'confirmModalActions';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'confirmModalBtnSecondary';
+  cancelBtn.id = 'confirmModalCancelBtn';
+  cancelBtn.type = 'button';
+  cancelBtn.textContent = cancelText;
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.className = 'confirmModalBtnPrimary';
+  confirmBtn.id = 'confirmModalConfirmBtn';
+  confirmBtn.type = 'button';
+  confirmBtn.textContent = confirmText;
+
+  actions.append(cancelBtn, confirmBtn);
+  confirmModal.appendChild(actions);
 
   confirmModalOverlay.style.display = 'block';
   confirmModal.style.display = 'block';
-
-  const cancelBtn = document.querySelector('#confirmModalCancelBtn');
-  const confirmBtn = document.querySelector('#confirmModalConfirmBtn');
 
   const closeDialog = () => {
     confirmModalOverlay.style.display = 'none';
@@ -2817,16 +2860,16 @@ function renderMonthly() {
 
 function renderApplianceSelect() {
   applianceSelect.innerHTML = '<option value="">选择已有电器（可选）</option>' +
-    appliances.map(function(a) { return '<option value="' + a.id + '">' + a.name + ' (' + a.watts + 'W)</option>'; }).join('');
+    appliances.map(function(a) { return '<option value="' + a.id + '">' + escapeHtml(a.name) + ' (' + a.watts + 'W)</option>'; }).join('');
 }
 
 function renderAppliances() {
   document.querySelector('#applianceRows').innerHTML = appliances.map(function(a) {
     return '<tr>' +
-      '<td>' + a.name + '</td>' +
+      '<td>' + escapeHtml(a.name) + '</td>' +
       '<td>' + a.watts + 'W</td>' +
-      '<td>' + a.slot + '</td>' +
-      '<td>' + (a.note || '') + '</td>' +
+      '<td>' + escapeHtml(a.slot) + '</td>' +
+      '<td>' + escapeHtml(a.note || '') + '</td>' +
       '<td>' +
         '<button data-edit-appliance="' + a.id + '">编辑</button>' +
         '<button data-del-appliance="' + a.id + '">删除</button>' +
@@ -2852,7 +2895,7 @@ function renderAppliances() {
 }
 
 function renderMemberSelect() {
-  const memberOptions = members.map(function(m) { return '<option value="' + m.name + '">' + m.name + '</option>'; }).join('');
+  const memberOptions = members.map(function(m) { return '<option value="' + escapeHtml(m.name) + '">' + escapeHtml(m.name) + '</option>'; }).join('');
   memberSelect.innerHTML = '<option value="">使用成员（可选）</option>' + memberOptions;
   batchMemberSelect.innerHTML = '<option value="">选择分配成员</option>' + memberOptions;
 }
@@ -2860,8 +2903,8 @@ function renderMemberSelect() {
 function renderMembers() {
   document.querySelector('#memberRows').innerHTML = members.map(function(m) {
     return '<tr>' +
-      '<td>' + m.name + '</td>' +
-      '<td>' + (m.note || '') + '</td>' +
+      '<td>' + escapeHtml(m.name) + '</td>' +
+      '<td>' + escapeHtml(m.note || '') + '</td>' +
       '<td>' +
         '<button data-edit-member="' + m.id + '">编辑</button>' +
         '<button data-del-member="' + m.id + '">删除</button>' +
@@ -2954,17 +2997,17 @@ function renderMemberStats() {
     const color = colors[index % colors.length];
     const topAppliancesHtml = stat.topAppliances.length > 0
       ? stat.topAppliances.map(function(app) {
-          return '<span class="topAppliance">' + app.name + ' (' + app.count + '次)</span>';
+          return '<span class="topAppliance">' + escapeHtml(app.name) + ' (' + app.count + '次)</span>';
         }).join('')
       : '<span class="empty">暂无</span>';
 
     return '<div class="memberStatCard">' +
         '<div class="memberStatHeader" style="border-left-color: ' + color + ';">' +
           '<div class="memberAvatar" style="background: ' + color + ';">' +
-            stat.name.charAt(0) +
+            escapeHtml(stat.name.charAt(0)) +
           '</div>' +
           '<div class="memberInfo">' +
-            '<h3>' + stat.name + '</h3>' +
+            '<h3>' + escapeHtml(stat.name) + '</h3>' +
             '<span class="memberRecordCount">' + stat.recordCount + ' 条记录</span>' +
           '</div>' +
         '</div>' +
@@ -3038,12 +3081,12 @@ function updateFilterOptions() {
   const memberNames = [...members.map(m => m.name), UNASSIGNED_LABEL];
   const currentMemberValue = filterMember.value;
   filterMember.innerHTML = '<option value="">全部成员</option>' +
-    memberNames.map(m => `<option value="${m}" ${m === currentMemberValue ? 'selected' : ''}>${m}</option>`).join('');
+    memberNames.map(m => `<option value="${escapeHtml(m)}" ${m === currentMemberValue ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('');
 
   const applianceNames = [...new Set(records.map(r => r.appliance))].sort();
   const currentApplianceValue = filterAppliance.value;
   filterAppliance.innerHTML = '<option value="">全部电器</option>' +
-    applianceNames.map(a => `<option value="${a}" ${a === currentApplianceValue ? 'selected' : ''}>${a}</option>`).join('');
+    applianceNames.map(a => `<option value="${escapeHtml(a)}" ${a === currentApplianceValue ? 'selected' : ''}>${escapeHtml(a)}</option>`).join('');
 
   const currentSlotValue = filterSlot.value;
   const slotOptions = ['清晨', '上午', '午间', '下午', '午后', '傍晚', '晚间', '深夜', '全天'];
@@ -3103,8 +3146,8 @@ function render() {
   if (activeFilters.length > 0) {
     filterActiveTags.innerHTML = activeFilters.map(function(f) {
       return '<span class="filterTag" data-type="' + f.type + '">' +
-        '<span class="filterTagLabel">' + f.label + ':</span>' +
-        '<span class="filterTagValue">' + f.value + '</span>' +
+        '<span class="filterTagLabel">' + escapeHtml(f.label) + ':</span>' +
+        '<span class="filterTagValue">' + escapeHtml(f.value) + '</span>' +
         '<button class="filterTagClose" data-type="' + f.type + '" aria-label="清除筛选">×</button>' +
       '</span>';
     }).join('');
@@ -3115,7 +3158,7 @@ function render() {
   }
 
   emptyStateFilters.innerHTML = activeFilters.map(function(f) {
-    return '<span class="emptyFilterTag">' + f.label + ': ' + f.value + '</span>';
+    return '<span class="emptyFilterTag">' + escapeHtml(f.label) + ': ' + escapeHtml(f.value) + '</span>';
   }).join('');
 
   const tableWrap = document.querySelector('#rows').closest('.tableWrap');
@@ -3131,7 +3174,7 @@ function render() {
       const memberName = getMemberName(record);
       const memberLabel = memberName === UNASSIGNED_LABEL
         ? '<span class="unassignedMember">' + UNASSIGNED_LABEL + '</span>'
-        : memberName;
+        : escapeHtml(memberName);
 
       let rowHtml = '<tr data-record-id="' + record.id + '">';
       if (batchAssignMode) {
@@ -3139,11 +3182,11 @@ function render() {
       }
       rowHtml += 
         '<td>' + record.date + '</td>' +
-        '<td>' + record.appliance + '</td>' +
+        '<td>' + escapeHtml(record.appliance) + '</td>' +
         '<td>' + memberLabel + '</td>' +
-        '<td>' + record.slot + '</td>' +
+        '<td>' + escapeHtml(record.slot) + '</td>' +
         '<td>' + kwh(record).toFixed(2) + 'kWh</td>' +
-        '<td>' + (record.note || '') + '</td>' +
+        '<td>' + escapeHtml(record.note || '') + '</td>' +
         '<td><button data-edit="' + record.id + '">编辑</button><button data-del="' + record.id + '">删除</button></td>' +
       '</tr>';
       return rowHtml;
@@ -3214,7 +3257,7 @@ function drawBars(selector, data, unit) {
   if (!data.length) return (el.innerHTML = '<p class="empty">暂无数据</p>');
   const max = Math.max.apply(Math, data.map(function(item) { return item.value; }).concat([1]));
   const bars = data.slice(0, 6).map(function(item, index) {
-    return '<text x="22" y="' + (43 + index * 36) + '">' + item.label + '</text>' +
+    return '<text x="22" y="' + (43 + index * 36) + '">' + escapeHtml(item.label) + '</text>' +
            '<rect x="150" y="' + (23 + index * 36) + '" width="' + ((item.value / max) * 300) + '" height="20" rx="4"/>' +
            '<text x="' + (160 + (item.value / max) * 300) + '" y="' + (39 + index * 36) + '">' + item.value.toFixed(2) + unit + '</text>';
   }).join('');
@@ -3235,7 +3278,7 @@ function drawDonut(selector, data) {
   }).join('');
   const legend = data.slice(0, 5).map(function(item, index) {
     return '<rect x="260" y="' + (52 + index * 30) + '" width="14" height="14" fill="' + colors[index] + '"/>' +
-           '<text x="285" y="' + (64 + index * 30) + '">' + item.label + ' ' + Math.round(item.value / total * 100) + '%</text>';
+           '<text x="285" y="' + (64 + index * 30) + '">' + escapeHtml(item.label) + ' ' + Math.round(item.value / total * 100) + '%</text>';
   }).join('');
   el.innerHTML = '<svg viewBox="0 0 500 220">' + rings + '<circle cx="135" cy="105" r="44" fill="white"/><text x="135" y="112">' + total.toFixed(1) + 'kWh</text>' + legend + '</svg>';
 }
