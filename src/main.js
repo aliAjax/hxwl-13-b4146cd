@@ -89,7 +89,9 @@ const tariffSeed = [
     peakHours: ['10:00-12:00', '19:00-21:00'],
     flatHours: ['08:00-10:00', '12:00-19:00', '21:00-23:00'],
     valleyHours: ['00:00-08:00', '23:00-24:00'],
-    isDefault: true
+    isDefault: true,
+    startMonth: '2026-06',
+    endMonth: ''
   },
   {
     id: crypto.randomUUID(),
@@ -100,7 +102,9 @@ const tariffSeed = [
     peakHours: ['09:00-12:00', '18:00-21:00'],
     flatHours: ['08:00-09:00', '12:00-18:00', '21:00-22:00'],
     valleyHours: ['00:00-08:00', '22:00-24:00'],
-    isDefault: false
+    isDefault: false,
+    startMonth: '2026-06',
+    endMonth: ''
   }
 ];
 
@@ -210,6 +214,88 @@ function migrateIgnoredAnomalies() {
   localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
 }
 migrateIgnoredAnomalies();
+
+function migrateTariffEffectivePeriod() {
+  let changed = false;
+  const currentMonth = new Date().toISOString().slice(0, 7);
+
+  const hasAnyValidPeriod = tariffs.some(t =>
+    (t.startMonth !== undefined && t.startMonth !== null && t.startMonth !== '') ||
+    (t.endMonth !== undefined && t.endMonth !== null && t.endMonth !== '')
+  );
+
+  tariffs.forEach(tariff => {
+    const startMissing = tariff.startMonth === undefined || tariff.startMonth === null;
+    const endMissing = tariff.endMonth === undefined || tariff.endMonth === null;
+
+    if (startMissing) {
+      if (hasAnyValidPeriod) {
+        const earliestStart = tariffs
+          .filter(t => t.startMonth)
+          .map(t => t.startMonth)
+          .sort()[0];
+        tariff.startMonth = earliestStart || currentMonth;
+      } else {
+        tariff.startMonth = currentMonth;
+      }
+      changed = true;
+    }
+    if (endMissing) {
+      tariff.endMonth = '';
+      changed = true;
+    }
+  });
+
+  if (tariffs.length > 0 && !tariffs.some(t => t.isDefault)) {
+    tariffs[0].isDefault = true;
+    changed = true;
+  }
+
+  if (changed) {
+    localStorage.setItem(tariffKey, JSON.stringify(tariffs));
+  }
+}
+migrateTariffEffectivePeriod();
+
+function getEffectiveTariff(dateOrMonth) {
+  const month = dateOrMonth.length === 10 ? dateOrMonth.slice(0, 7) : dateOrMonth;
+
+  const withPeriod = tariffs.filter(t => t.startMonth || t.endMonth);
+  const withoutPeriod = tariffs.filter(t => !t.startMonth && !t.endMonth);
+
+  const sortedByStart = [...withPeriod].sort((a, b) => {
+    const aStart = a.startMonth || '';
+    const bStart = b.startMonth || '';
+    return bStart.localeCompare(aStart);
+  });
+
+  for (const tariff of sortedByStart) {
+    const start = tariff.startMonth || '';
+    const end = tariff.endMonth || '';
+    if (start && month < start) continue;
+    if (end && month > end) continue;
+    return tariff;
+  }
+
+  if (withoutPeriod.length > 0) {
+    return withoutPeriod.find(t => t.isDefault) || withoutPeriod[0];
+  }
+
+  return tariffs.find(t => t.isDefault) || tariffs[0] || null;
+}
+
+function getEffectiveTariffPrice(dateOrMonth) {
+  const tariff = getEffectiveTariff(dateOrMonth);
+  if (tariff) return tariff.flatPrice;
+  return priceSettings.price;
+}
+
+function calculateRecordCostWithEffectiveTariff(record) {
+  const tariff = getEffectiveTariff(record.date);
+  if (!tariff) return { kwh: kwh(record), tier: 'flat', price: priceSettings.price, cost: kwh(record) * priceSettings.price, tariff };
+  return { ...calculateRecordCost(record, tariff), tariff };
+}
+
 let scheduleTasks = JSON.parse(localStorage.getItem(scheduleTaskKey) || 'null') || scheduleTaskSeed;
 let scheduleResult = JSON.parse(localStorage.getItem(scheduleResultKey) || 'null');
 let scheduleConfig = JSON.parse(localStorage.getItem(scheduleConfigKey) || 'null') || scheduleConfigSeed;
@@ -546,6 +632,18 @@ document.querySelector('#app').innerHTML = `
             <label style="display:flex; align-items:center; gap:8px;">
               <input name="isDefault" type="checkbox" />
               <span style="margin:0;">设为默认方案</span>
+            </label>
+          </div>
+          <div class="tariffFormRow">
+            <label>
+              <span>生效起始月份</span>
+              <input name="startMonth" type="month" />
+              <small style="font-size:11px;color:#6b7280;">留空表示不限制起始月份</small>
+            </label>
+            <label>
+              <span>生效结束月份</span>
+              <input name="endMonth" type="month" />
+              <small style="font-size:11px;color:#6b7280;">留空表示持续生效至今</small>
             </label>
           </div>
           <div class="tariffPriceRow">
@@ -1626,6 +1724,36 @@ tariffForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(tariffForm).entries());
 
+  if (data.startMonth && data.endMonth && data.startMonth > data.endMonth) {
+    showToast('error', '生效期无效', '开始月份不能晚于结束月份');
+    return;
+  }
+
+  if (data.startMonth || data.endMonth) {
+    const hasOverlap = tariffs.some(t => {
+      if (editingTariffId && t.id === editingTariffId) return false;
+      const tStart = t.startMonth || '';
+      const tEnd = t.endMonth || '';
+      const newStart = data.startMonth || '';
+      const newEnd = data.endMonth || '';
+
+      function overlaps(aStart, aEnd, bStart, bEnd) {
+        const effAStart = aStart || '0000-00';
+        const effAEnd = aEnd || '9999-99';
+        const effBStart = bStart || '0000-00';
+        const effBEnd = bEnd || '9999-99';
+        return effAStart <= effBEnd && effBStart <= effAEnd;
+      }
+      return overlaps(newStart, newEnd, tStart, tEnd);
+    });
+
+    if (hasOverlap) {
+      if (!confirm('检测到与其他电价方案的生效期存在重叠，重叠期间将优先使用起始月份较晚的方案。是否继续保存？')) {
+        return;
+      }
+    }
+  }
+
   const peakHours = data.peakHours.split(',').map(h => h.trim()).filter(h => h);
   const flatHours = data.flatHours.split(',').map(h => h.trim()).filter(h => h);
   const valleyHours = data.valleyHours.split(',').map(h => h.trim()).filter(h => h);
@@ -1644,7 +1772,9 @@ tariffForm.addEventListener('submit', (event) => {
     peakHours,
     flatHours,
     valleyHours,
-    isDefault: data.isDefault === 'on'
+    isDefault: data.isDefault === 'on',
+    startMonth: data.startMonth || '',
+    endMonth: data.endMonth || ''
   };
 
   if (item.isDefault) {
@@ -2465,17 +2595,64 @@ function renderTariffList() {
     return;
   }
 
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const effectiveNow = getEffectiveTariff(currentMonth);
+
+  function getTariffCoverageInfo(tariff) {
+    const start = tariff.startMonth || '';
+    const end = tariff.endMonth || '';
+    const allMonths = [...new Set(records.map(r => r.date.slice(0, 7)))].sort();
+    let coveredCount = 0;
+    allMonths.forEach(m => {
+      if (start && m < start) return;
+      if (end && m > end) return;
+      coveredCount++;
+    });
+    return {
+      total: allMonths.length,
+      covered: coveredCount,
+      percent: allMonths.length > 0 ? (coveredCount / allMonths.length * 100) : 0
+    };
+  }
+
   tariffList.innerHTML = tariffs.map(function(tariff) {
-    return '<div class="tariffCard ' + (tariff.isDefault ? 'default' : '') + '">' +
+    const start = tariff.startMonth || '';
+    const end = tariff.endMonth || '';
+    let periodText = '';
+    let periodClass = '';
+    if (start && end) {
+      periodText = start + ' ~ ' + end;
+      periodClass = (currentMonth >= start && currentMonth <= end) ? 'active' : 'expired';
+    } else if (start && !end) {
+      periodText = start + ' 起';
+      periodClass = currentMonth >= start ? 'active' : 'expired';
+    } else if (!start && end) {
+      periodText = '至 ' + end;
+      periodClass = currentMonth <= end ? 'active' : 'expired';
+    } else {
+      periodText = '未设置生效期';
+      periodClass = 'unspecified';
+    }
+    const periodLabel = periodClass === 'active' ? '生效中' : periodClass === 'expired' ? '已过期' : '未限定';
+    const isCurrentEffective = effectiveNow && effectiveNow.id === tariff.id;
+    const coverage = getTariffCoverageInfo(tariff);
+
+    return '<div class="tariffCard ' + (tariff.isDefault ? 'default' : '') + ' ' + (isCurrentEffective ? 'currentlyEffective' : '') + '">' +
       '<div class="tariffCardHeader">' +
         '<div class="tariffCardTitle">' +
           '<h4>' + escapeHtml(tariff.name) + '</h4>' +
           (tariff.isDefault ? '<span class="defaultBadge">默认</span>' : '') +
+          (isCurrentEffective ? '<span class="effectiveBadge">本月生效</span>' : '') +
         '</div>' +
         '<div class="tariffCardActions">' +
           '<button data-edit-tariff="' + tariff.id + '">编辑</button>' +
           '<button data-del-tariff="' + tariff.id + '" style="background:#fee2e2; color:#dc2626;">删除</button>' +
         '</div>' +
+      '</div>' +
+      '<div class="tariffPeriodRow">' +
+        '<span class="tariffPeriodBadge ' + periodClass + '">' + periodLabel + '</span>' +
+        '<span class="tariffPeriodText">' + periodText + '</span>' +
+        '<span class="tariffPeriodInfo" title="覆盖已有记录的月份比例">📊 覆盖 ' + coverage.covered + '/' + coverage.total + ' 个月 (' + coverage.percent.toFixed(0) + '%)</span>' +
       '</div>' +
       '<div class="tariffCardPrices">' +
         '<div class="tariffPrice peak">' +
@@ -2522,14 +2699,17 @@ function renderTariffList() {
     tariffForm.elements.flatHours.value = tariff.flatHours.join(',');
     tariffForm.elements.valleyHours.value = tariff.valleyHours.join(',');
     tariffForm.elements.isDefault.checked = tariff.isDefault;
+    tariffForm.elements.startMonth.value = tariff.startMonth || '';
+    tariffForm.elements.endMonth.value = tariff.endMonth || '';
     tariffFormContainer.style.display = 'block';
   });});
 }
 
 function renderTariffSelects() {
-  const options = tariffs.map(function(t) {
-    return '<option value="' + t.id + '">' + escapeHtml(t.name) + (t.isDefault ? ' (默认)' : '') + '</option>';
-  }).join('');
+  const options = '<option value="">按记录日期自动匹配</option>' +
+    tariffs.map(function(t) {
+      return '<option value="' + t.id + '">' + escapeHtml(t.name) + (t.isDefault ? ' (默认)' : '') + '</option>';
+    }).join('');
   detailTariffSelect.innerHTML = options;
 
   const months = [...new Set(records.map(function(r) { return r.date.slice(0, 7); }))].sort().reverse();
@@ -2552,7 +2732,17 @@ function renderTariffComparison() {
     return;
   }
 
-  const results = tariffs.map(tariff => ({
+  const effectiveTariffs = tariffs.filter(t => {
+    const start = t.startMonth || '';
+    const end = t.endMonth || '';
+    if (start && month < start) return false;
+    if (end && month > end) return false;
+    return true;
+  });
+
+  const tariffsToCompare = effectiveTariffs.length > 0 ? effectiveTariffs : tariffs;
+
+  const results = tariffsToCompare.map(tariff => ({
     tariff,
     ...calculateMonthCost(monthRecords, tariff)
   }));
@@ -2633,35 +2823,58 @@ function renderTariffComparison() {
 
 function renderTariffDetail() {
   const tariffId = detailTariffSelect.value;
-  const tariff = tariffs.find(function(t) { return t.id === tariffId; });
-  if (!tariff) {
-    tariffDetailRows.innerHTML = '<tr><td colspan="7" class="empty">暂无数据</td></tr>';
-    return;
-  }
-
   const month = comparisonMonthSelect.value;
+  const autoMatch = tariffId === '';
+
   const monthRecords = records.filter(function(r) { return r.date.startsWith(month); });
 
   if (monthRecords.length === 0) {
-    tariffDetailRows.innerHTML = '<tr><td colspan="7" class="empty">该月份暂无用电记录</td></tr>';
+    tariffDetailRows.innerHTML = '<tr><td colspan="8" class="empty">该月份暂无用电记录</td></tr>';
     return;
+  }
+
+  let headerRow = document.querySelector('.tariffDetailTable thead tr');
+  if (autoMatch) {
+    if (headerRow.cells.length === 7) {
+      const tariffTh = document.createElement('th');
+      tariffTh.textContent = '适用电价';
+      headerRow.insertBefore(tariffTh, headerRow.cells[5]);
+    }
+  } else {
+    if (headerRow.cells.length === 8) {
+      headerRow.removeChild(headerRow.cells[5]);
+    }
   }
 
   tariffDetailRows.innerHTML = monthRecords
     .sort(function(a, b) { return b.date.localeCompare(a.date); })
     .map(function(record) {
+      let tariff;
+      if (autoMatch) {
+        tariff = getEffectiveTariff(record.date);
+      } else {
+        tariff = tariffs.find(t => t.id === tariffId);
+      }
+      if (!tariff) {
+        return '<tr><td colspan="' + (autoMatch ? 8 : 7) + '" class="empty">暂无电价方案</td></tr>';
+      }
       const result = calculateRecordCost(record, tariff);
       const tierName = getTierName(result.tier);
       const tierColor = getTierColor(result.tier);
-      return '<tr>' +
+      let rowHtml = '<tr>' +
         '<td>' + record.date + '</td>' +
         '<td>' + escapeHtml(record.appliance) + '</td>' +
         '<td>' + escapeHtml(record.slot) + '</td>' +
         '<td><span class="tierBadge" style="background: ' + tierColor + '20; color: ' + tierColor + ';">' + tierName + '</span></td>' +
-        '<td>' + result.kwh.toFixed(2) + 'kWh</td>' +
+        '<td>' + result.kwh.toFixed(2) + 'kWh</td>';
+      if (autoMatch) {
+        rowHtml += '<td><span class="tariffNameBadge" title="' + escapeHtml(tariff.name) + '">' + escapeHtml(tariff.name) + '</span></td>';
+      }
+      rowHtml +=
         '<td>¥' + result.price.toFixed(2) + '/kWh</td>' +
         '<td><strong>¥' + result.cost.toFixed(2) + '</strong></td>' +
       '</tr>';
+      return rowHtml;
     }).join('');
 }
 
@@ -2763,7 +2976,8 @@ function generateSchedule() {
     return;
   }
 
-  const defaultTariff = tariffs.find(t => t.isDefault) || tariffs[0];
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const defaultTariff = getEffectiveTariff(currentMonth) || tariffs.find(t => t.isDefault) || tariffs[0];
   if (!defaultTariff) {
     showToast('error', '无电价方案', '请先在分时电价模拟器中添加电价方案');
     return;
@@ -3263,8 +3477,9 @@ function generateApplianceSuggestions(recentRecords, defaultTariff) {
       flatKwh: 0
     };
     const kwhValue = kwh(record);
+    const tariff = getEffectiveTariff(record.date) || defaultTariff;
     const tier = getSlotTier(record.slot);
-    const price = defaultTariff ? getTierPrice(defaultTariff, tier) : priceSettings.price;
+    const price = tariff ? getTierPrice(tariff, tier) : priceSettings.price;
     stats.totalKwh += kwhValue;
     stats.totalCost += kwhValue * price;
     stats.recordCount++;
@@ -3377,7 +3592,8 @@ function generateScheduleSuggestions(recentRecords, defaultTariff) {
       records: []
     };
     const kwhValue = kwh(record);
-    const price = getTierPrice(defaultTariff, tier);
+    const tariff = getEffectiveTariff(record.date) || defaultTariff;
+    const price = getTierPrice(tariff, tier);
     stats.totalKwh += kwhValue;
     stats.totalCost += kwhValue * price;
     stats.recordCount++;
@@ -3532,8 +3748,9 @@ function getMemberStatsForSuggestions(recentRecords, defaultTariff) {
     const memberName = getMemberName(record);
     const memberStat = stats.get(memberName) || stats.get(UNASSIGNED_LABEL);
     const kwhValue = kwh(record);
+    const tariff = getEffectiveTariff(record.date) || defaultTariff;
     const tier = getSlotTier(record.slot);
-    const price = defaultTariff ? getTierPrice(defaultTariff, tier) : priceSettings.price;
+    const price = tariff ? getTierPrice(tariff, tier) : priceSettings.price;
 
     memberStat.totalKwh += kwhValue;
     memberStat.totalCost += kwhValue * price;
@@ -3566,7 +3783,8 @@ function generateAnomalySuggestions(recentRecords) {
   if (activeAnomalies.length > 0) {
     const highSeverity = activeAnomalies.filter(a => a.severity === 'high');
     const totalWasteKwh = activeAnomalies.reduce((s, a) => s + (a.stats?.deviationAmount || 0), 0);
-    const totalWasteCost = totalWasteKwh * priceSettings.price;
+    const todayPrice = getEffectiveTariffPrice(new Date().toISOString().slice(0, 7));
+    const totalWasteCost = totalWasteKwh * todayPrice;
 
     suggestions.push({
       id: 'anomaly-fix',
@@ -3606,6 +3824,7 @@ function generateAnomalySuggestions(recentRecords) {
   longRunningAppliances.forEach((recs, name) => {
     if (recs.length >= 2 && name !== '冰箱') {
       const totalHours = recs.reduce((s, r) => s + r.hours, 0);
+      const avgPrice = recs.reduce((s, r) => s + getEffectiveTariffPrice(r.date), 0) / recs.length;
       suggestions.push({
         id: `long-running-${name}`,
         type: 'anomaly',
@@ -3616,7 +3835,7 @@ function generateAnomalySuggestions(recentRecords) {
         description: `「${name}」有 ${recs.length} 次运行超过 8 小时（累计 ${totalHours.toFixed(1)}h），请检查是否忘记关闭或存在异常。`,
         savings: {
           kwh: recs.reduce((s, r) => s + kwh(r), 0) * 0.3,
-          cost: recs.reduce((s, r) => s + kwh(r), 0) * 0.3 * priceSettings.price
+          cost: recs.reduce((s, r) => s + kwh(r), 0) * 0.3 * avgPrice
         },
         evidence: [
           { type: 'stat', label: '超长次数', value: `${recs.length}次` },
@@ -3885,14 +4104,25 @@ function renderMonthly() {
   const { price, month } = priceSettings;
   const monthlyRecords = records.filter((record) => record.date.startsWith(month));
   const monthlyTotal = monthlyRecords.reduce((sum, record) => sum + kwh(record), 0);
-  const estimatedCost = monthlyTotal * price;
+
+  const effectiveTariff = getEffectiveTariff(month);
+  let estimatedCost = 0;
+  if (effectiveTariff) {
+    const costResult = calculateMonthCost(monthlyRecords, effectiveTariff);
+    estimatedCost = costResult.totalCost;
+  } else {
+    estimatedCost = monthlyTotal * price;
+  }
+
   const daysInMonth = getDaysInMonth(month);
   const dailyAverage = estimatedCost / daysInMonth;
   const daysWithData = [...new Set(monthlyRecords.map((r) => r.date))].length;
 
+  const tariffHint = effectiveTariff ? '（按「' + escapeHtml(effectiveTariff.name) + '」分时电价）' : '（按统一单价）';
+
   document.querySelector('#monthlySummary').innerHTML = [
     ['当月总耗电', monthlyTotal.toFixed(2) + 'kWh'],
-    ['预计电费', '¥' + estimatedCost.toFixed(2)],
+    ['预计电费' + tariffHint, '¥' + estimatedCost.toFixed(2)],
     ['日均费用', '¥' + dailyAverage.toFixed(2)],
     ['活跃天数', daysWithData + '/' + daysInMonth + '天']
   ].map(function(item) { 
@@ -3998,7 +4228,10 @@ function getMemberStats() {
     const memberName = getMemberName(record);
     const memberStat = stats.get(memberName) || stats.get(UNASSIGNED_LABEL);
     const kwhValue = kwh(record);
-    const cost = kwhValue * priceSettings.price;
+    const effectiveTariff = getEffectiveTariff(record.date);
+    const tier = getSlotTier(record.slot);
+    const price = effectiveTariff ? getTierPrice(effectiveTariff, tier) : priceSettings.price;
+    const cost = kwhValue * price;
 
     memberStat.totalKwh += kwhValue;
     memberStat.totalCost += cost;

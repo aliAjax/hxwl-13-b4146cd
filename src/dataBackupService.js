@@ -1,5 +1,5 @@
-const BACKUP_SCHEMA_VERSION = 2;
-const APP_VERSION = '1.1.0';
+const BACKUP_SCHEMA_VERSION = 3;
+const APP_VERSION = '1.2.0';
 
 const STORAGE_KEYS = {
   records: 'hxwl-13-home-energy',
@@ -84,6 +84,17 @@ const VERSION_MIGRATIONS = {
         earliestStart: task.earliestStart || '00:00',
         forbiddenRanges: task.forbiddenRanges || [],
         tariffId: task.tariffId || ''
+      }));
+    }
+    return result;
+  },
+  3: (data) => {
+    const result = { ...data };
+    if (result.tariffs && Array.isArray(result.tariffs)) {
+      result.tariffs = result.tariffs.map(tariff => ({
+        ...tariff,
+        startMonth: tariff.startMonth !== undefined ? tariff.startMonth : '',
+        endMonth: tariff.endMonth !== undefined ? tariff.endMonth : ''
       }));
     }
     return result;
@@ -490,7 +501,7 @@ function analyzeDifferences(currentData, importedData) {
         analysis.tariffs.items.push({ type: 'add', imported, matchType: null });
       } else {
         const differences = [];
-        ['name', 'peakPrice', 'flatPrice', 'valleyPrice', 'isDefault'].forEach(field => {
+        ['name', 'peakPrice', 'flatPrice', 'valleyPrice', 'isDefault', 'startMonth', 'endMonth'].forEach(field => {
           const cVal = match[field];
           const iVal = imported[field];
           if (String(cVal) !== String(iVal)) {
