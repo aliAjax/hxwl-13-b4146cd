@@ -7,9 +7,11 @@ const STORAGE_KEYS = {
   members: 'hxwl-13-home-energy-members',
   priceSettings: 'hxwl-13-home-energy-price',
   goalSettings: 'hxwl-13-home-energy-goal',
+  goalHistory: 'hxwl-13-home-energy-goal-history',
   tariffs: 'hxwl-13-home-energy-tariffs',
   slotMapping: 'hxwl-13-home-energy-slot-mapping',
-  ignoredAnomalies: 'hxwl-13-home-energy-anomaly-ignore'
+  ignoredAnomalies: 'hxwl-13-home-energy-anomaly-ignore',
+  anomalyRules: 'hxwl-13-home-energy-anomaly-rules'
 };
 
 const RECORD_UNIQUE_FIELDS = ['date', 'appliance', 'slot', 'hours', 'watts'];
@@ -26,6 +28,13 @@ const DEFAULT_SLOT_MAPPING = {
   '全天': 'flat'
 };
 
+const DEFAULT_ANOMALY_RULES = {
+  version: 1,
+  highSingleUsage: { enabled: true, sensitivity: 'medium' },
+  dailySpike: { enabled: true, sensitivity: 'medium' },
+  abnormalDuration: { enabled: true, sensitivity: 'medium' }
+};
+
 const VERSION_MIGRATIONS = {
   1: (data) => {
     const result = { ...data };
@@ -37,6 +46,9 @@ const VERSION_MIGRATIONS = {
     }
     if (!result.tariffs) {
       result.tariffs = [];
+    }
+    if (!result.anomalyRules) {
+      result.anomalyRules = { ...DEFAULT_ANOMALY_RULES };
     }
     if (result.records) {
       result.records = result.records.map(record => ({
@@ -78,9 +90,11 @@ function createBackup(options = {}, sourceData = null) {
     includeMembers = true,
     includePriceSettings = true,
     includeGoalSettings = true,
+    includeGoalHistory = true,
     includeTariffs = true,
     includeSlotMapping = true,
-    includeIgnoredAnomalies = true
+    includeIgnoredAnomalies = true,
+    includeAnomalyRules = true
   } = options;
 
   const allData = sourceData || getCurrentData();
@@ -91,9 +105,11 @@ function createBackup(options = {}, sourceData = null) {
   if (includeMembers) filteredData.members = allData.members ?? [];
   if (includePriceSettings) filteredData.priceSettings = allData.priceSettings ?? null;
   if (includeGoalSettings) filteredData.goalSettings = allData.goalSettings ?? null;
+  if (includeGoalHistory) filteredData.goalHistory = allData.goalHistory ?? [];
   if (includeTariffs) filteredData.tariffs = allData.tariffs ?? [];
   if (includeSlotMapping) filteredData.slotMapping = allData.slotMapping ?? null;
   if (includeIgnoredAnomalies) filteredData.ignoredAnomalies = allData.ignoredAnomalies ?? [];
+  if (includeAnomalyRules) filteredData.anomalyRules = allData.anomalyRules ?? { ...DEFAULT_ANOMALY_RULES };
 
   const backup = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -221,9 +237,11 @@ function analyzeDifferences(currentData, importedData) {
     members: { added: 0, updated: 0, skipped: 0, items: [] },
     priceSettings: { action: 'none', current: null, imported: null },
     goalSettings: { action: 'none', current: null, imported: null },
+    goalHistory: { action: 'none', current: null, imported: null },
     tariffs: { added: 0, updated: 0, skipped: 0, items: [] },
     slotMapping: { action: 'none', different: false },
-    ignoredAnomalies: { action: 'none', count: 0 }
+    ignoredAnomalies: { action: 'none', count: 0 },
+    anomalyRules: { action: 'none', different: false }
   };
 
   if (importedData.records) {
@@ -401,6 +419,28 @@ function analyzeDifferences(currentData, importedData) {
     }
   }
 
+  if (importedData.goalHistory && importedData.goalHistory.length > 0) {
+    const current = currentData.goalHistory || [];
+    const currentMonths = new Set(current.map(g => g.month));
+    let hasDifference = importedData.goalHistory.some(g => !currentMonths.has(g.month));
+    if (!hasDifference) {
+      for (const ig of importedData.goalHistory) {
+        const cg = current.find(g => g.month === ig.month);
+        if (!cg || cg.target !== ig.target) {
+          hasDifference = true;
+          break;
+        }
+      }
+    }
+    if (hasDifference) {
+      analysis.goalHistory = {
+        action: 'merge',
+        current,
+        imported: importedData.goalHistory
+      };
+    }
+  }
+
   if (importedData.tariffs) {
     const currentTariffs = currentData.tariffs || [];
     const currentMap = new Map(currentTariffs.map(t => [t.id, t]));
@@ -487,6 +527,35 @@ function analyzeDifferences(currentData, importedData) {
     };
   }
 
+  if (importedData.anomalyRules) {
+    const current = currentData.anomalyRules;
+    const imported = importedData.anomalyRules;
+    let different = !current;
+
+    if (!different && current && imported) {
+      const types = ['highSingleUsage', 'dailySpike', 'abnormalDuration'];
+      for (const type of types) {
+        if (!current[type] || !imported[type]) {
+          different = true;
+          break;
+        }
+        if (current[type].enabled !== imported[type].enabled) {
+          different = true;
+          break;
+        }
+        if (current[type].sensitivity !== imported[type].sensitivity) {
+          different = true;
+          break;
+        }
+      }
+    }
+
+    analysis.anomalyRules = {
+      action: different ? 'update' : 'none',
+      different
+    };
+  }
+
   return analysis;
 }
 
@@ -497,9 +566,11 @@ function applyRestore(analysis, importedData, options = {}) {
     includeMembers = true,
     includePriceSettings = true,
     includeGoalSettings = true,
+    includeGoalHistory = true,
     includeTariffs = true,
     includeSlotMapping = true,
     includeIgnoredAnomalies = true,
+    includeAnomalyRules = true,
     updateMode = 'skip'
   } = options;
 
@@ -632,6 +703,25 @@ function applyRestore(analysis, importedData, options = {}) {
     }
   }
 
+  if (includeGoalHistory && analysis.goalHistory.action === 'merge') {
+    if (updateMode === 'overwrite' || updateMode === 'update') {
+      const current = currentData.goalHistory || [];
+      const imported = analysis.goalHistory.imported;
+      const merged = [...current];
+      const monthMap = new Map(merged.map(g => [g.month, g]));
+      imported.forEach(ig => {
+        if (monthMap.has(ig.month)) {
+          const idx = merged.findIndex(g => g.month === ig.month);
+          merged[idx] = ig;
+        } else {
+          merged.push(ig);
+        }
+      });
+      merged.sort((a, b) => b.month.localeCompare(a.month));
+      localStorage.setItem(STORAGE_KEYS.goalHistory, JSON.stringify(merged));
+    }
+  }
+
   if (includeTariffs && analysis.tariffs.items.length > 0) {
     const tariffs = [...(currentData.tariffs || [])];
     const existingIds = new Set(tariffs.map(t => t.id));
@@ -692,8 +782,39 @@ function applyRestore(analysis, importedData, options = {}) {
   if (includeIgnoredAnomalies && analysis.ignoredAnomalies.action === 'merge') {
     const current = currentData.ignoredAnomalies || [];
     const imported = importedData && importedData.ignoredAnomalies ? importedData.ignoredAnomalies : [];
-    const merged = [...new Set([...current, ...imported])];
+
+    const getAnomalyId = (item) => {
+      if (typeof item === 'string') return item;
+      if (item && item.id) return item.id;
+      return null;
+    };
+
+    const existingIds = new Set(current.map(getAnomalyId).filter(Boolean));
+    const merged = [...current];
+    imported.forEach(item => {
+      const id = getAnomalyId(item);
+      if (id && !existingIds.has(id)) {
+        if (typeof item === 'string') {
+          merged.push({
+            id: item,
+            ignoredAt: Date.now(),
+            ruleSnapshot: { ...DEFAULT_ANOMALY_RULES }
+          });
+        } else {
+          merged.push(item);
+        }
+        existingIds.add(id);
+      }
+    });
     localStorage.setItem(STORAGE_KEYS.ignoredAnomalies, JSON.stringify(merged));
+  }
+
+  if (includeAnomalyRules && analysis.anomalyRules && analysis.anomalyRules.different) {
+    if (updateMode === 'overwrite' || updateMode === 'update') {
+      if (importedData && importedData.anomalyRules) {
+        localStorage.setItem(STORAGE_KEYS.anomalyRules, JSON.stringify(importedData.anomalyRules));
+      }
+    }
   }
 
   return stats;

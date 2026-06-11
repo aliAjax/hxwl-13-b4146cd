@@ -285,6 +285,40 @@ td button { margin-left: 6px; background: #e4ecff; }
   gap: 12px;
   align-items: center;
 }
+.goalMonthNav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #f0f4fa;
+  border-radius: 8px;
+  padding: 2px 4px;
+}
+.goalNavBtn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 20px;
+  line-height: 1;
+  color: #3b6bc7;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.goalNavBtn:hover {
+  background: #dce5f5;
+}
+.goalMonthLabel {
+  font-size: 14px;
+  font-weight: 600;
+  color: #172033;
+  min-width: 80px;
+  text-align: center;
+  user-select: none;
+}
 .toastContainer {
   position: fixed;
   top: 20px;
@@ -380,6 +414,7 @@ td button { margin-left: 6px; background: #e4ecff; }
   .csvActions { flex-wrap: wrap; }
   .goalSummary { grid-template-columns: 1fr; }
   .goalFormRow { grid-template-columns: 1fr; }
+  .goalActions { flex-wrap: wrap; }
   .toastContainer { left: 20px; right: 20px; }
   .toast { min-width: auto; }
   .memberStatsGrid { grid-template-columns: 1fr !important; }
@@ -2448,5 +2483,286 @@ td button { margin-left: 6px; background: #e4ecff; }
 
   .emptyState {
     padding: 40px 16px;
+  }
+}
+
+.anomalyStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px;
+  background: #f8faff;
+  border-radius: 8px;
+  border: 1px solid #e5ebf5;
+}
+
+.anomalyStatItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.anomalyStatLabel {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.anomalyStatValue {
+  font-size: 14px;
+  font-weight: 600;
+  color: #172033;
+}
+
+.anomalyStatValue.current {
+  color: #dc2626;
+}
+
+.anomalyStatValue.threshold {
+  color: #d97706;
+}
+
+.anomalyStatValue.deviation {
+  color: #dc2626;
+}
+
+.anomalySensTag {
+  display: inline-block;
+  padding: 3px 10px;
+  background: #eef4ff;
+  color: #2563eb;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.anomalyRulesWrap {
+  padding: 16px;
+  background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%);
+  border: 1px solid #d5deee;
+  border-radius: 10px;
+}
+
+.anomalyRulesHeader {
+  margin-bottom: 16px;
+}
+
+.anomalyRulesTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: #172033;
+  margin: 0 0 4px 0;
+}
+
+.anomalyRulesHint {
+  font-size: 13px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.anomalyRulesList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.anomalyRuleCard {
+  background: white;
+  border: 1px solid #e5ebf5;
+  border-radius: 8px;
+  padding: 14px;
+  transition: all 0.2s;
+}
+
+.anomalyRuleCard:hover {
+  border-color: #bfdbfe;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+.anomalyRuleCard.disabled {
+  opacity: 0.6;
+  background: #fafbfd;
+}
+
+.anomalyRuleTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.anomalyRuleInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.anomalyRuleIcon {
+  font-size: 18px;
+}
+
+.anomalyRuleName {
+  font-size: 14px;
+  font-weight: 600;
+  color: #172033;
+}
+
+.anomalyRuleToggle {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.anomalyRuleToggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.anomalyRuleToggleSlider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #d1d5db;
+  transition: 0.3s;
+  border-radius: 24px;
+}
+
+.anomalyRuleToggleSlider:before {
+  position: absolute;
+  content: '';
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+}
+
+.anomalyRuleToggle input:checked + .anomalyRuleToggleSlider {
+  background-color: #2563eb;
+}
+
+.anomalyRuleToggle input:checked + .anomalyRuleToggleSlider:before {
+  transform: translateX(20px);
+}
+
+.anomalyRuleSens {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.anomalyRuleSensLabel {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.anomalyRuleSensOptions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sensOption {
+  flex: 1;
+  min-width: 60px;
+  padding: 8px 12px;
+  border: 2px solid #e5ebf5;
+  border-radius: 6px;
+  background: white;
+  color: #5c6982;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.sensOption:hover {
+  border-color: #93c5fd;
+}
+
+.sensOption.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.sensOption.low.selected {
+  border-color: #059669;
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.sensOption.medium.selected {
+  border-color: #d97706;
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.sensOption.high.selected {
+  border-color: #dc2626;
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.anomalyRulesActions {
+  display: flex;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid #e5ebf5;
+}
+
+.anomalyRulesActions button {
+  flex: 1;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.anomalyRulesActions .saveBtn {
+  background: #2563eb;
+  color: white;
+}
+
+.anomalyRulesActions .saveBtn:hover {
+  background: #1d4ed8;
+}
+
+.anomalyRulesActions .resetBtn {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.anomalyRulesActions .resetBtn:hover {
+  background: #e5e7eb;
+}
+
+@media (max-width: 600px) {
+  .anomalyStatsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .anomalyRuleSensOptions {
+    flex-direction: column;
+  }
+
+  .sensOption {
+    width: 100%;
   }
 }

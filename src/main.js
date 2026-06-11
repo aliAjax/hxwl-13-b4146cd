@@ -13,12 +13,36 @@ const key = 'hxwl-13-home-energy';
 const priceKey = 'hxwl-13-home-energy-price';
 const applianceKey = 'hxwl-13-home-energy-appliances';
 const goalKey = 'hxwl-13-home-energy-goal';
+const goalHistoryKey = 'hxwl-13-home-energy-goal-history';
 const memberKey = 'hxwl-13-home-energy-members';
 const tariffKey = 'hxwl-13-home-energy-tariffs';
 const slotMappingKey = 'hxwl-13-home-energy-slot-mapping';
 const anomalyIgnoreKey = 'hxwl-13-home-energy-anomaly-ignore';
+const anomalyRulesKey = 'hxwl-13-home-energy-anomaly-rules';
 const scheduleTaskKey = 'hxwl-13-home-energy-schedule-tasks';
 const scheduleResultKey = 'hxwl-13-home-energy-schedule-result';
+
+const ANOMALY_SENSITIVITY_MAP = {
+  low:    { stdDevMultiplier: 2.5, minRatioMultiplier: 1.6, label: '低敏感' },
+  medium: { stdDevMultiplier: 1.5, minRatioMultiplier: 1.3, label: '中敏感' },
+  high:   { stdDevMultiplier: 0.8, minRatioMultiplier: 1.1, label: '高敏感' }
+};
+
+const DEFAULT_ANOMALY_RULES = {
+  version: 1,
+  highSingleUsage: {
+    enabled: true,
+    sensitivity: 'medium'
+  },
+  dailySpike: {
+    enabled: true,
+    sensitivity: 'medium'
+  },
+  abnormalDuration: {
+    enabled: true,
+    sensitivity: 'medium'
+  }
+};
 const seed = [
   { id: crypto.randomUUID(), appliance: '空调', date: '2026-06-01', slot: '晚间', hours: 4, watts: 900, note: '睡前开启', member: '爸爸' },
   { id: crypto.randomUUID(), appliance: '电热水器', date: '2026-06-01', slot: '傍晚', hours: 1.2, watts: 1800, note: '洗澡前加热', member: '妈妈' },
@@ -130,6 +154,14 @@ let editingMemberId = null;
 let editingMemberOldName = null;
 let priceSettings = JSON.parse(localStorage.getItem(priceKey) || 'null') || { price: 0.56, month: new Date().toISOString().slice(0, 7) };
 let goalSettings = JSON.parse(localStorage.getItem(goalKey) || 'null') || null;
+let goalHistory = JSON.parse(localStorage.getItem(goalHistoryKey) || 'null') || null;
+if (!goalHistory) {
+  goalHistory = goalSettings ? [goalSettings] : [];
+} else if (goalSettings) {
+  const exists = goalHistory.some(g => g.month === goalSettings.month);
+  if (!exists) goalHistory.unshift(goalSettings);
+}
+let selectedGoalMonth = goalHistory.length > 0 ? goalHistory[0].month : new Date().toISOString().slice(0, 7);
 let lastNotifiedOverTarget = false;
 let batchAssignMode = false;
 let selectedRecordIds = [];
@@ -141,6 +173,22 @@ let showTariffForm = false;
 let showMappingConfig = false;
 let ignoredAnomalies = JSON.parse(localStorage.getItem(anomalyIgnoreKey) || '[]');
 let showIgnoredAnomalies = false;
+let anomalyRules = JSON.parse(localStorage.getItem(anomalyRulesKey) || 'null') || { ...DEFAULT_ANOMALY_RULES };
+let showAnomalyRulesConfig = false;
+
+function migrateIgnoredAnomalies() {
+  if (ignoredAnomalies.length === 0) return;
+  const needsMigration = ignoredAnomalies.some(item => typeof item === 'string');
+  if (!needsMigration) return;
+  const migrated = ignoredAnomalies.map(id => ({
+    id,
+    ignoredAt: Date.now(),
+    ruleSnapshot: JSON.parse(JSON.stringify(anomalyRules))
+  }));
+  ignoredAnomalies = migrated;
+  localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
+}
+migrateIgnoredAnomalies();
 let scheduleTasks = JSON.parse(localStorage.getItem(scheduleTaskKey) || 'null') || scheduleTaskSeed;
 let scheduleResult = JSON.parse(localStorage.getItem(scheduleResultKey) || 'null');
 let editingScheduleTaskId = null;
@@ -164,6 +212,7 @@ let backupRestoreOptions = {
   includeTariffs: true,
   includeSlotMapping: true,
   includeIgnoredAnomalies: true,
+  includeAnomalyRules: true,
   includeScheduleTasks: true
 };
 
@@ -177,6 +226,7 @@ function getBackupSourceData() {
     tariffs,
     slotMapping,
     ignoredAnomalies,
+    anomalyRules,
     scheduleTasks
   };
 }
@@ -197,8 +247,13 @@ document.querySelector('#app').innerHTML = `
 
     <section class="panel energyGoalPanel" id="energyGoalSection">
       <div class="panelHead">
-        <h2>🎯 本月节能目标</h2>
+        <h2>🎯 节能目标</h2>
         <div class="goalActions">
+          <div class="goalMonthNav">
+            <button id="goalPrevMonth" class="goalNavBtn" title="上一月">‹</button>
+            <span id="goalMonthLabel" class="goalMonthLabel"></span>
+            <button id="goalNextMonth" class="goalNavBtn" title="下一月">›</button>
+          </div>
           <button id="setGoalBtn" class="primary">设置目标</button>
         </div>
       </div>
@@ -251,10 +306,12 @@ document.querySelector('#app').innerHTML = `
       <div class="panelHead">
         <h2>⚠️ 异常用电提醒</h2>
         <div class="anomalyActions">
-          <button id="toggleIgnoredBtn" class="primary">显示已忽略</button>
+          <button id="anomalyRulesBtn" class="primary">规则设置</button>
+          <button id="toggleIgnoredBtn">显示已忽略</button>
           <button id="clearIgnoredBtn" style="background:#fee2e2; color:#dc2626;">清除忽略记录</button>
         </div>
       </div>
+      <div id="anomalyRulesContainer" style="display:none; margin-top:16px;"></div>
       <div id="anomalyStats" class="anomalyStats"></div>
       <div id="anomalyListContainer" style="margin-top:16px;"></div>
     </section>
@@ -733,6 +790,8 @@ const tariffComparisonContainer = document.querySelector('#tariffComparisonConta
 const tariffDetailRows = document.querySelector('#tariffDetailRows');
 const anomalyStats = document.querySelector('#anomalyStats');
 const anomalyListContainer = document.querySelector('#anomalyListContainer');
+const anomalyRulesContainer = document.querySelector('#anomalyRulesContainer');
+const anomalyRulesBtn = document.querySelector('#anomalyRulesBtn');
 const toggleIgnoredBtn = document.querySelector('#toggleIgnoredBtn');
 const clearIgnoredBtn = document.querySelector('#clearIgnoredBtn');
 
@@ -977,13 +1036,13 @@ priceForm.addEventListener('submit', (event) => {
 });
 
 setGoalBtn.addEventListener('click', () => {
-  const currentMonth = new Date().toISOString().slice(0, 7);
   goalForm.reset();
-  if (goalSettings) {
-    goalForm.elements.month.value = goalSettings.month;
-    goalForm.elements.target.value = goalSettings.target;
+  const existingGoal = goalHistory.find(g => g.month === selectedGoalMonth);
+  if (existingGoal) {
+    goalForm.elements.month.value = existingGoal.month;
+    goalForm.elements.target.value = existingGoal.target;
   } else {
-    goalForm.elements.month.value = currentMonth;
+    goalForm.elements.month.value = selectedGoalMonth;
   }
   goalFormContainer.style.display = 'block';
 });
@@ -1001,11 +1060,35 @@ goalForm.addEventListener('submit', (event) => {
     showToast('error', '目标值无效', '请设置大于0的目标耗电量');
     return;
   }
-  goalSettings = { month: data.month, target: targetValue };
+  const newGoal = { month: data.month, target: targetValue };
+  const existingIdx = goalHistory.findIndex(g => g.month === data.month);
+  if (existingIdx !== -1) {
+    goalHistory[existingIdx] = newGoal;
+  } else {
+    goalHistory.unshift(newGoal);
+    goalHistory.sort((a, b) => b.month.localeCompare(a.month));
+  }
+  goalSettings = newGoal;
+  selectedGoalMonth = data.month;
   localStorage.setItem(goalKey, JSON.stringify(goalSettings));
+  localStorage.setItem(goalHistoryKey, JSON.stringify(goalHistory));
   lastNotifiedOverTarget = false;
   goalFormContainer.style.display = 'none';
-  showToast('success', '目标已设置', `本月节能目标：${goalSettings.target} kWh`);
+  showToast('success', '目标已设置', `${data.month} 节能目标：${targetValue} kWh`);
+  render();
+});
+
+document.querySelector('#goalPrevMonth').addEventListener('click', () => {
+  const [year, month] = selectedGoalMonth.split('-').map(Number);
+  const prev = new Date(year, month - 2, 1);
+  selectedGoalMonth = prev.toISOString().slice(0, 7);
+  render();
+});
+
+document.querySelector('#goalNextMonth').addEventListener('click', () => {
+  const [year, month] = selectedGoalMonth.split('-').map(Number);
+  const next = new Date(year, month, 1);
+  selectedGoalMonth = next.toISOString().slice(0, 7);
   render();
 });
 
@@ -1606,6 +1689,16 @@ clearIgnoredBtn.addEventListener('click', () => {
   }
 });
 
+anomalyRulesBtn.addEventListener('click', () => {
+  showAnomalyRulesConfig = !showAnomalyRulesConfig;
+  anomalyRulesBtn.textContent = showAnomalyRulesConfig ? '收起设置' : '规则设置';
+  anomalyRulesBtn.style.background = showAnomalyRulesConfig ? '#64748b' : '';
+  anomalyRulesContainer.style.display = showAnomalyRulesConfig ? 'block' : 'none';
+  if (showAnomalyRulesConfig) {
+    renderAnomalyRulesConfig();
+  }
+});
+
 function validateTimeRanges(ranges) {
   const timeRegex = /^\d{2}:\d{2}-\d{2}:\d{2}$/;
   return ranges.every(range => timeRegex.test(range));
@@ -1616,23 +1709,169 @@ function getAnomalyId(type, recordId, date) {
 }
 
 function isAnomalyIgnored(anomalyId) {
-  return ignoredAnomalies.includes(anomalyId);
+  return ignoredAnomalies.some(item => item.id === anomalyId);
+}
+
+function getIgnoredAnomalyRecord(anomalyId) {
+  return ignoredAnomalies.find(item => item.id === anomalyId);
 }
 
 function ignoreAnomaly(anomalyId) {
-  if (!ignoredAnomalies.includes(anomalyId)) {
-    ignoredAnomalies.push(anomalyId);
+  if (!isAnomalyIgnored(anomalyId)) {
+    ignoredAnomalies.push({
+      id: anomalyId,
+      ignoredAt: Date.now(),
+      ruleSnapshot: JSON.parse(JSON.stringify(anomalyRules))
+    });
     localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
   }
 }
 
 function unignoreAnomaly(anomalyId) {
-  ignoredAnomalies = ignoredAnomalies.filter(id => id !== anomalyId);
+  ignoredAnomalies = ignoredAnomalies.filter(item => item.id !== anomalyId);
   localStorage.setItem(anomalyIgnoreKey, JSON.stringify(ignoredAnomalies));
+}
+
+function haveRulesChanged(oldRules, newRules) {
+  const types = ['highSingleUsage', 'dailySpike', 'abnormalDuration'];
+  for (const type of types) {
+    if (!oldRules[type] || !newRules[type]) return true;
+    if (oldRules[type].enabled !== newRules[type].enabled) return true;
+    if (oldRules[type].sensitivity !== newRules[type].sensitivity) return true;
+  }
+  return false;
+}
+
+function reevaluateIgnoredAnomalies(oldRules) {
+  if (!oldRules || !haveRulesChanged(oldRules, anomalyRules)) return 0;
+  const beforeCount = ignoredAnomalies.length;
+  const toRemove = [];
+  ignoredAnomalies.forEach(item => {
+    const itemRules = item.ruleSnapshot || oldRules;
+    if (haveRulesChanged(itemRules, anomalyRules)) {
+      toRemove.push(item.id);
+    }
+  });
+  toRemove.forEach(id => unignoreAnomaly(id));
+  return beforeCount - ignoredAnomalies.length;
+}
+
+function saveAnomalyRules() {
+  localStorage.setItem(anomalyRulesKey, JSON.stringify(anomalyRules));
+}
+
+function renderAnomalyRulesConfig() {
+  const ruleTypes = [
+    { key: 'highSingleUsage', label: '单次耗电偏高', icon: '⚡', desc: '检测某电器单次耗电量明显高于历史均值' },
+    { key: 'dailySpike', label: '日耗电突增', icon: '📈', desc: '检测某一天的总耗电量明显高于历史日均' },
+    { key: 'abnormalDuration', label: '使用时长异常', icon: '⏰', desc: '检测某电器使用时长明显高于历史均值' }
+  ];
+  const sensitivityOptions = [
+    { value: 'low', label: '低敏感', hint: '需要偏离更多才会触发' },
+    { value: 'medium', label: '中敏感', hint: '平衡检测精度与误报率' },
+    { value: 'high', label: '高敏感', hint: '小幅偏离即可触发，误报可能增多' }
+  ];
+
+  const rulesHtml = ruleTypes.map(rule => {
+    const config = anomalyRules[rule.key];
+    const sensHtml = sensitivityOptions.map(opt => `
+      <label class="sensOption ${config.sensitivity === opt.value ? 'selected' : ''}">
+        <input type="radio" name="sens_${rule.key}" value="${opt.value}" ${config.sensitivity === opt.value ? 'checked' : ''} />
+        <span>
+          <strong>${opt.label}</strong>
+          <em>${opt.hint}</em>
+        </span>
+      </label>
+    `).join('');
+    return `
+      <div class="anomalyRuleCard">
+        <div class="anomalyRuleHead">
+          <label class="anomalyRuleToggle">
+            <input type="checkbox" data-rule-enable="${rule.key}" ${config.enabled ? 'checked' : ''} />
+            <span class="toggleTrack"><span class="toggleThumb"></span></span>
+            <span class="ruleIcon">${rule.icon}</span>
+            <span class="ruleLabel">${rule.label}</span>
+          </label>
+        </div>
+        <p class="anomalyRuleDesc">${rule.desc}</p>
+        <div class="anomalySensGroup" ${config.enabled ? '' : 'style="opacity:0.5; pointer-events:none;"'}>
+          <span class="sensGroupLabel">敏感度：</span>
+          ${sensHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  anomalyRulesContainer.innerHTML = `
+    <div class="anomalyRulesWrap">
+      <div class="anomalyRulesHint">
+        <span class="hintIcon">💡</span>
+        <span>调整敏感度后，之前已忽略的异常会根据新规则重新评估，不再符合条件的将自动恢复显示。</span>
+      </div>
+      ${rulesHtml}
+      <div class="anomalyRulesActions">
+        <button id="resetAnomalyRulesBtn" class="anomalyRuleReset">恢复默认</button>
+        <button id="saveAnomalyRulesBtn" class="primary">保存规则</button>
+      </div>
+    </div>
+  `;
+
+  anomalyRulesContainer.querySelectorAll('[data-rule-enable]').forEach(checkbox => {
+    checkbox.addEventListener('change', (e) => {
+      const key = e.target.dataset.ruleEnable;
+      const card = e.target.closest('.anomalyRuleCard');
+      const sensGroup = card.querySelector('.anomalySensGroup');
+      if (e.target.checked) {
+        sensGroup.style.opacity = '1';
+        sensGroup.style.pointerEvents = 'auto';
+      } else {
+        sensGroup.style.opacity = '0.5';
+        sensGroup.style.pointerEvents = 'none';
+      }
+    });
+  });
+
+  anomalyRulesContainer.querySelectorAll('.sensOption input[type="radio"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      const parent = e.target.closest('.sensOption').parentNode;
+      parent.querySelectorAll('.sensOption').forEach(opt => opt.classList.remove('selected'));
+      e.target.closest('.sensOption').classList.add('selected');
+    });
+  });
+
+  document.querySelector('#resetAnomalyRulesBtn').addEventListener('click', () => {
+    if (confirm('确定要将异常检测规则恢复为默认设置吗？')) {
+      anomalyRules = JSON.parse(JSON.stringify(DEFAULT_ANOMALY_RULES));
+      renderAnomalyRulesConfig();
+      showToast('info', '已重置', '规则已恢复为默认设置，请点击保存生效');
+    }
+  });
+
+  document.querySelector('#saveAnomalyRulesBtn').addEventListener('click', () => {
+    const oldRules = JSON.parse(JSON.stringify(anomalyRules));
+    ruleTypes.forEach(rule => {
+      const enableCheckbox = anomalyRulesContainer.querySelector(`[data-rule-enable="${rule.key}"]`);
+      const sensRadio = anomalyRulesContainer.querySelector(`input[name="sens_${rule.key}"]:checked`);
+      anomalyRules[rule.key] = {
+        enabled: enableCheckbox.checked,
+        sensitivity: sensRadio.value
+      };
+    });
+    saveAnomalyRules();
+    const reevaluated = reevaluateIgnoredAnomalies(oldRules);
+    showToast('success', '保存成功', reevaluated > 0
+      ? `规则已保存，${reevaluated} 条已忽略异常已重新评估`
+      : '规则已保存');
+    render();
+  });
 }
 
 function detectHighSingleUsage() {
   const anomalies = [];
+  const rule = anomalyRules.highSingleUsage;
+  if (!rule || !rule.enabled) return anomalies;
+
+  const sens = ANOMALY_SENSITIVITY_MAP[rule.sensitivity] || ANOMALY_SENSITIVITY_MAP.medium;
   const applianceRecords = new Map();
 
   records.forEach(record => {
@@ -1649,13 +1888,17 @@ function detectHighSingleUsage() {
     const mean = kwhValues.reduce((a, b) => a + b, 0) / kwhValues.length;
     const variance = kwhValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / kwhValues.length;
     const stdDev = Math.sqrt(variance);
-    const threshold = mean + 1.5 * stdDev;
+    const threshold = mean + sens.stdDevMultiplier * stdDev;
+    const minRatio = sens.minRatioMultiplier;
 
     applianceRecs.forEach(record => {
       const recordKwh = kwh(record);
-      if (recordKwh > threshold && recordKwh > mean * 1.3) {
+      if (recordKwh > threshold && recordKwh > mean * minRatio) {
         const anomalyId = getAnomalyId('high-single', record.id);
         if (!showIgnoredAnomalies && isAnomalyIgnored(anomalyId)) return;
+
+        const deviation = ((recordKwh / mean - 1) * 100).toFixed(0);
+        const deviationAmount = (recordKwh - mean).toFixed(2);
 
         anomalies.push({
           id: anomalyId,
@@ -1666,8 +1909,18 @@ function detectHighSingleUsage() {
           recordId: record.id,
           date: record.date,
           appliance: record.appliance,
-          message: `${record.appliance} 单次耗电 ${recordKwh.toFixed(2)}kWh，超出平均值 ${((recordKwh / mean - 1) * 100).toFixed(0)}%`,
+          message: `${record.appliance} 单次耗电 ${recordKwh.toFixed(2)}kWh，超出平均值 ${deviation}%`,
           details: `该电器历史平均耗电：${mean.toFixed(2)}kWh，异常阈值：${threshold.toFixed(2)}kWh`,
+          stats: {
+            unit: 'kWh',
+            currentValue: recordKwh,
+            meanValue: mean,
+            thresholdValue: threshold,
+            deviationPercent: Number(deviation),
+            deviationAmount: Number(deviationAmount),
+            sensitivity: rule.sensitivity,
+            sensitivityLabel: sens.label
+          },
           ignored: isAnomalyIgnored(anomalyId)
         });
       }
@@ -1679,6 +1932,10 @@ function detectHighSingleUsage() {
 
 function detectDailySpike() {
   const anomalies = [];
+  const rule = anomalyRules.dailySpike;
+  if (!rule || !rule.enabled) return anomalies;
+
+  const sens = ANOMALY_SENSITIVITY_MAP[rule.sensitivity] || ANOMALY_SENSITIVITY_MAP.medium;
   const dailyTotals = new Map();
 
   records.forEach(record => {
@@ -1692,13 +1949,17 @@ function detectDailySpike() {
   const mean = totals.reduce((a, b) => a + b, 0) / totals.length;
   const variance = totals.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / totals.length;
   const stdDev = Math.sqrt(variance);
-  const threshold = mean + 1.5 * stdDev;
+  const threshold = mean + sens.stdDevMultiplier * stdDev;
+  const minRatio = sens.minRatioMultiplier;
 
   dailyTotals.forEach((total, date) => {
-    if (total > threshold && total > mean * 1.3) {
+    if (total > threshold && total > mean * minRatio) {
       const dayRecords = records.filter(r => r.date === date);
       const anomalyId = getAnomalyId('daily-spike', null, date);
       if (!showIgnoredAnomalies && isAnomalyIgnored(anomalyId)) return;
+
+      const deviation = ((total / mean - 1) * 100).toFixed(0);
+      const deviationAmount = (total - mean).toFixed(2);
 
       anomalies.push({
         id: anomalyId,
@@ -1707,8 +1968,18 @@ function detectDailySpike() {
         severity: total > mean * 2 ? 'high' : 'medium',
         date,
         recordIds: dayRecords.map(r => r.id),
-        message: `${date} 总耗电 ${total.toFixed(2)}kWh，超出日均 ${((total / mean - 1) * 100).toFixed(0)}%`,
+        message: `${date} 总耗电 ${total.toFixed(2)}kWh，超出日均 ${deviation}%`,
         details: `历史日均耗电：${mean.toFixed(2)}kWh，异常阈值：${threshold.toFixed(2)}kWh，当日记录：${dayRecords.length}条`,
+        stats: {
+          unit: 'kWh',
+          currentValue: total,
+          meanValue: mean,
+          thresholdValue: threshold,
+          deviationPercent: Number(deviation),
+          deviationAmount: Number(deviationAmount),
+          sensitivity: rule.sensitivity,
+          sensitivityLabel: sens.label
+        },
         ignored: isAnomalyIgnored(anomalyId)
       });
     }
@@ -1719,6 +1990,10 @@ function detectDailySpike() {
 
 function detectAbnormalDuration() {
   const anomalies = [];
+  const rule = anomalyRules.abnormalDuration;
+  if (!rule || !rule.enabled) return anomalies;
+
+  const sens = ANOMALY_SENSITIVITY_MAP[rule.sensitivity] || ANOMALY_SENSITIVITY_MAP.medium;
   const applianceRecords = new Map();
 
   records.forEach(record => {
@@ -1735,12 +2010,16 @@ function detectAbnormalDuration() {
     const mean = hoursValues.reduce((a, b) => a + b, 0) / hoursValues.length;
     const variance = hoursValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / hoursValues.length;
     const stdDev = Math.sqrt(variance);
-    const threshold = mean + 1.5 * stdDev;
+    const threshold = mean + sens.stdDevMultiplier * stdDev;
+    const minRatio = sens.minRatioMultiplier;
 
     applianceRecs.forEach(record => {
-      if (record.hours > threshold && record.hours > mean * 1.3) {
+      if (record.hours > threshold && record.hours > mean * minRatio) {
         const anomalyId = getAnomalyId('duration', record.id);
         if (!showIgnoredAnomalies && isAnomalyIgnored(anomalyId)) return;
+
+        const deviation = ((record.hours / mean - 1) * 100).toFixed(0);
+        const deviationAmount = (record.hours - mean).toFixed(1);
 
         anomalies.push({
           id: anomalyId,
@@ -1751,8 +2030,18 @@ function detectAbnormalDuration() {
           recordId: record.id,
           date: record.date,
           appliance: record.appliance,
-          message: `${record.appliance} 使用时长 ${record.hours.toFixed(1)}小时，超出平均值 ${((record.hours / mean - 1) * 100).toFixed(0)}%`,
+          message: `${record.appliance} 使用时长 ${record.hours.toFixed(1)}小时，超出平均值 ${deviation}%`,
           details: `该电器历史平均时长：${mean.toFixed(1)}小时，异常阈值：${threshold.toFixed(1)}小时`,
+          stats: {
+            unit: '小时',
+            currentValue: record.hours,
+            meanValue: mean,
+            thresholdValue: threshold,
+            deviationPercent: Number(deviation),
+            deviationAmount: Number(deviationAmount),
+            sensitivity: rule.sensitivity,
+            sensitivityLabel: sens.label
+          },
           ignored: isAnomalyIgnored(anomalyId)
         });
       }
@@ -1853,6 +2142,36 @@ function renderAnomalyAlerts() {
     const typeIcon = anomaly.type === 'high-single' ? '⚡' : anomaly.type === 'daily-spike' ? '📈' : '⏰';
     const ignoreText = anomaly.ignored ? '取消忽略' : '忽略';
     const locateText = anomaly.type === 'daily-spike' ? '查看当日记录' : '定位记录';
+    const hasStats = anomaly.stats && Object.keys(anomaly.stats).length > 0;
+
+    let statsHtml = '';
+    if (hasStats) {
+      const s = anomaly.stats;
+      const displayDeviation = s.deviationAmount > 0 ? `+${s.deviationAmount}${s.unit}` : `${s.deviationAmount}${s.unit}`;
+      statsHtml = `
+        <div class="anomalyStatsGrid">
+          <div class="anomalyStatItem">
+            <span class="anomalyStatLabel">本次数值</span>
+            <span class="anomalyStatValue current">${s.currentValue.toFixed(s.unit === '小时' ? 1 : 2)}${s.unit}</span>
+          </div>
+          <div class="anomalyStatItem">
+            <span class="anomalyStatLabel">历史均值</span>
+            <span class="anomalyStatValue">${s.meanValue.toFixed(s.unit === '小时' ? 1 : 2)}${s.unit}</span>
+          </div>
+          <div class="anomalyStatItem">
+            <span class="anomalyStatLabel">触发阈值</span>
+            <span class="anomalyStatValue threshold">${s.thresholdValue.toFixed(s.unit === '小时' ? 1 : 2)}${s.unit}</span>
+          </div>
+          <div class="anomalyStatItem">
+            <span class="anomalyStatLabel">本次偏差</span>
+            <span class="anomalyStatValue deviation">${displayDeviation} (${s.deviationPercent > 0 ? '+' : ''}${s.deviationPercent}%)</span>
+          </div>
+        </div>
+        <div class="anomalySensTag">
+          敏感度: ${s.sensitivityLabel}
+        </div>
+      `;
+    }
 
     return `
       <div class="anomalyCard ${severityClass} ${anomaly.ignored ? 'ignored' : ''}" data-anomaly-id="${anomaly.id}">
@@ -1866,6 +2185,7 @@ function renderAnomalyAlerts() {
         </div>
         <div class="anomalyCardBody">
           <p class="anomalyMessage">${escapeHtml(anomaly.message)}</p>
+          ${statsHtml}
           <p class="anomalyDetails">${escapeHtml(anomaly.details)}</p>
         </div>
         <div class="anomalyCardActions">
@@ -2722,8 +3042,8 @@ function showConfirmDialog(options) {
   }, { once: true });
 }
 
-function getCurrentMonthTotal() {
-  const currentMonth = goalSettings ? goalSettings.month : new Date().toISOString().slice(0, 7);
+function getCurrentMonthTotal(monthStr) {
+  const currentMonth = monthStr || (goalSettings ? goalSettings.month : new Date().toISOString().slice(0, 7));
   const monthlyRecords = records.filter((record) => record.date.startsWith(currentMonth));
   return monthlyRecords.reduce((sum, record) => sum + kwh(record), 0);
 }
@@ -2757,7 +3077,17 @@ function checkAndNotifyGoal() {
 }
 
 function renderEnergyGoal() {
-  const currentTotal = getCurrentMonthTotal();
+  const goalMonthLabel = document.querySelector('#goalMonthLabel');
+  const goalPrevBtn = document.querySelector('#goalPrevMonth');
+  const goalNextBtn = document.querySelector('#goalNextMonth');
+
+  const displayMonth = selectedGoalMonth;
+  const [y, m] = displayMonth.split('-');
+  goalMonthLabel.textContent = `${y}年${parseInt(m)}月`;
+
+  const currentGoal = goalHistory.find(g => g.month === displayMonth) || null;
+  const currentTotal = getCurrentMonthTotal(displayMonth);
+
   const goalCurrentEl = document.querySelector('#goalCurrent');
   const goalTargetEl = document.querySelector('#goalTarget');
   const goalRemainingEl = document.querySelector('#goalRemaining');
@@ -2769,19 +3099,19 @@ function renderEnergyGoal() {
 
   goalCurrentEl.textContent = `${currentTotal.toFixed(2)} kWh`;
 
-  if (!goalSettings) {
+  if (!currentGoal) {
     goalTargetEl.textContent = '-- kWh';
     goalRemainingEl.textContent = '-- kWh';
     goalProgressFill.style.width = '0%';
     goalProgressFill.className = 'progressFill';
     goalPercentEl.textContent = '0%';
-    goalHintEl.textContent = '请先设置本月节能目标';
+    goalHintEl.textContent = `${y}年${parseInt(m)}月尚未设置节能目标`;
     progressLabels.className = 'progressLabels';
     goalStats.forEach(stat => stat.className = 'goalStat');
     return;
   }
 
-  const target = goalSettings.target;
+  const target = currentGoal.target;
   const remaining = target - currentTotal;
   const percent = target > 0 ? Math.min((currentTotal / target) * 100, 100) : (currentTotal > 0 ? 100 : 0);
   const isOverTarget = target <= 0 || currentTotal > target;
@@ -2813,7 +3143,7 @@ function renderEnergyGoal() {
     progressLabels.classList.add('warning');
     goalHintEl.textContent = `即将达到目标，剩余 ${remaining.toFixed(2)} kWh`;
   } else {
-    goalHintEl.textContent = `目标月份：${goalSettings.month}`;
+    goalHintEl.textContent = `目标月份：${currentGoal.month}`;
   }
 }
 
@@ -3651,6 +3981,17 @@ function renderDiffPreviewStep() {
     `;
   }
 
+  if (analysis.goalHistory && analysis.goalHistory.action !== 'none') {
+    html += `
+      <div class="brDiffCategory">
+        <div class="brDiffCategoryHeader">
+          <span class="brDiffCategoryTitle">🎯 目标历史</span>
+          <span class="brDiffBadge update">将合并</span>
+        </div>
+      </div>
+    `;
+  }
+
   if (analysis.slotMapping.different) {
     html += `
       <div class="brDiffCategory">
@@ -3799,6 +4140,7 @@ function renderConfirmStep() {
       ${analysis.tariffs ? `<p style="font-size:14px; margin:6px 0;">电价方案：新增 ${analysis.tariffs.added} 条 / 更新 ${analysis.tariffs.updated} 条 / 跳过 ${analysis.tariffs.skipped} 条</p>` : ''}
       ${analysis.priceSettings.action !== 'none' ? '<p style="font-size:14px; margin:6px 0;">电价设置：将更新</p>' : ''}
       ${analysis.goalSettings.action !== 'none' ? '<p style="font-size:14px; margin:6px 0;">节能目标：将更新</p>' : ''}
+      ${analysis.goalHistory && analysis.goalHistory.action !== 'none' ? '<p style="font-size:14px; margin:6px 0;">目标历史：将合并</p>' : ''}
       ${analysis.slotMapping.different ? '<p style="font-size:14px; margin:6px 0;">时段映射：将更新</p>' : ''}
       ${analysis.ignoredAnomalies.action === 'merge' ? `<p style="font-size:14px; margin:6px 0;">已忽略异常：合并 ${analysis.ignoredAnomalies.count} 条</p>` : ''}
     </div>
@@ -4022,6 +4364,12 @@ function handleApplyRestore() {
     members = JSON.parse(localStorage.getItem(memberKey) || 'null') || memberSeed;
     priceSettings = JSON.parse(localStorage.getItem(priceKey) || 'null') || { price: 0.56, month: new Date().toISOString().slice(0, 7) };
     goalSettings = JSON.parse(localStorage.getItem(goalKey) || 'null') || null;
+    goalHistory = JSON.parse(localStorage.getItem(goalHistoryKey) || 'null') || [];
+    if (goalSettings) {
+      const exists = goalHistory.some(g => g.month === goalSettings.month);
+      if (!exists) goalHistory.unshift(goalSettings);
+    }
+    selectedGoalMonth = goalHistory.length > 0 ? goalHistory[0].month : new Date().toISOString().slice(0, 7);
     tariffs = JSON.parse(localStorage.getItem(tariffKey) || 'null') || tariffSeed;
     slotMapping = JSON.parse(localStorage.getItem(slotMappingKey) || 'null') || slotMappingSeed;
     ignoredAnomalies = JSON.parse(localStorage.getItem(anomalyIgnoreKey) || '[]');
